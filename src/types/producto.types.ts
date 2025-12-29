@@ -1,6 +1,11 @@
 /**
  * 📦 TIPOS DE PRODUCTOS - UDAR EDGE
  * Define los tipos base para productos con vinculación a stock
+ * 
+ * JERARQUÍA:
+ * Gerente → Empresa → Marca → Submarca → Productos
+ * 
+ * Los productos se asocian a SUBMARCAS (no a categorías genéricas)
  */
 
 // ============================================
@@ -16,7 +21,13 @@ export type TipoProducto = 'simple' | 'manufacturado' | 'combo';
 export interface ProductoBase {
   id: string;
   nombre: string;
-  categoria: string;
+  
+  // ⭐ CAMBIO: categoria → submarcaId
+  submarcaId: string; // ID de la submarca (ej: "SUB-MODOMIO", "SUB-BLACKBURGER")
+  
+  // Tipo de producto (opcional, para clasificación dentro de la submarca)
+  tipoProducto?: string; // "Combo", "Burger", "Pizza", "Entrante", "Postre", "Bebida"
+  
   precio: number;
   descripcion: string;
   destacado?: boolean;

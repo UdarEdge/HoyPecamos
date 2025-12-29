@@ -16,6 +16,7 @@ import { Checkbox } from '../ui/checkbox';
 export interface SelectedContext {
   empresa_id: string;
   marca_id: string | null;
+  submarca_id: string | null;  // ⭐ NUEVO: Nivel de submarcas
   punto_venta_id: string | null;
 }
 
@@ -50,6 +51,7 @@ interface Marca {
   nombre: string;
   empresa_id: string;
   puntos_venta: PuntoVenta[];
+  submarcas: Submarca[];  // ⭐ NUEVO: Nivel de submarcas
 }
 
 interface PuntoVenta {
@@ -58,6 +60,14 @@ interface PuntoVenta {
   nombre_comercial: string;
   marca_id: string;
   empresa_id: string;
+}
+
+interface Submarca {  // ⭐ NUEVO: Nivel de submarcas
+  submarca_id: string;
+  codigo_submarca: string;
+  nombre: string;
+  marca_id: string;
+  puntos_venta: PuntoVenta[];
 }
 
 interface FiltroUniversalUDARProps {
@@ -107,6 +117,23 @@ const EMPRESAS_MOCK: Empresa[] = [
             nombre_comercial: 'Badalona',
             marca_id: 'MRC-001',
             empresa_id: 'EMP-001'
+          }
+        ],
+        submarcas: [  // ⭐ NUEVO: Nivel de submarcas
+          {
+            submarca_id: 'SUB-001',
+            codigo_submarca: 'SUB-001',
+            nombre: 'Submarca 1',
+            marca_id: 'MRC-001',
+            puntos_venta: [
+              {
+                punto_venta_id: 'PDV-TIANA',
+                codigo_punto_venta: 'PDV-TIANA',
+                nombre_comercial: 'Tiana',
+                marca_id: 'MRC-001',
+                empresa_id: 'EMP-001'
+              }
+            ]
           }
         ]
       },
@@ -313,6 +340,7 @@ export function FiltroUniversalUDAR({
       newContext.push({
         empresa_id: empresaId,
         marca_id: null,
+        submarca_id: null,  // ⭐ NUEVO: Nivel de submarcas
         punto_venta_id: null
       });
     }
@@ -340,6 +368,7 @@ export function FiltroUniversalUDAR({
       newContext.push({
         empresa_id: empresaId,
         marca_id: marcaId,
+        submarca_id: null,  // ⭐ NUEVO: Nivel de submarcas
         punto_venta_id: null
       });
     }
@@ -368,6 +397,7 @@ export function FiltroUniversalUDAR({
       newContext.push({
         empresa_id: empresaId,
         marca_id: marcaId,
+        submarca_id: null,  // ⭐ NUEVO: Nivel de submarcas
         punto_venta_id: pdvId
       });
     }

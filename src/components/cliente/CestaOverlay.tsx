@@ -31,6 +31,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { useCart } from '../../contexts/CartContext';
 import { useProductos } from '../../contexts/ProductosContext';
+import { SUBMARCAS_ARRAY } from '../../constants/empresaConfig';
 
 interface CestaOverlayProps {
   isOpen: boolean;
@@ -149,7 +150,8 @@ export function CestaOverlay({ isOpen, onOpenChange, onProcederPago, userData }:
     nombre: string;
     precio: number;
     imagen: string;
-    categoria: string;
+    tipoProducto: string;
+    submarcaId: string;
     stock?: number;
   }> = [];
 
@@ -165,7 +167,8 @@ export function CestaOverlay({ isOpen, onOpenChange, onProcederPago, userData }:
             nombre: producto.nombre,
             precio: producto.precio,
             imagen: producto.imagen || '',
-            categoria: producto.categoria || '',
+            tipoProducto: producto.tipoProducto || '',
+            submarcaId: producto.submarcaId,
             stock: producto.stock,
           };
         }
@@ -175,18 +178,18 @@ export function CestaOverlay({ isOpen, onOpenChange, onProcederPago, userData }:
   } else {
     // SUGERENCIAS POR CATEGORÍA (fallback si no hay historial)
     const tieneBebidas = items.some(item => 
-      item.categoria?.toLowerCase().includes('bebida') || 
-      item.categoria?.toLowerCase().includes('refresco')
+      item.tipoProducto?.toLowerCase().includes('bebida') || 
+      item.tipoProducto?.toLowerCase().includes('refresco')
     );
     const tienePostres = items.some(item => 
-      item.categoria?.toLowerCase().includes('postre') || 
-      item.categoria?.toLowerCase().includes('helado') ||
-      item.categoria?.toLowerCase().includes('dulce')
+      item.tipoProducto?.toLowerCase().includes('postre') || 
+      item.tipoProducto?.toLowerCase().includes('helado') ||
+      item.tipoProducto?.toLowerCase().includes('dulce')
     );
     const tieneComplementos = items.some(item => 
-      item.categoria?.toLowerCase().includes('complemento') || 
-      item.categoria?.toLowerCase().includes('extra') ||
-      item.categoria?.toLowerCase().includes('acompañamiento')
+      item.tipoProducto?.toLowerCase().includes('complemento') || 
+      item.tipoProducto?.toLowerCase().includes('extra') ||
+      item.tipoProducto?.toLowerCase().includes('acompañamiento')
     );
 
     let categoriaASugerir = '';
@@ -204,19 +207,22 @@ export function CestaOverlay({ isOpen, onOpenChange, onProcederPago, userData }:
 
     productosSugeridos = categoriaASugerir
       ? productosContext
-          .filter(p => 
-            p.activo !== false && 
-            p.visible_tpv !== false &&
-            p.marcas_ids?.includes(marcaIdActual) &&
-            p.categoria?.toLowerCase().includes(categoriaASugerir)
-          )
+          .filter(p => {
+            const submarcaDelProd = SUBMARCAS_ARRAY.find(s => s.id === p.submarcaId);
+            const perteneceAMarca = submarcaDelProd ? submarcaDelProd.marcaId === marcaIdActual : false;
+            return p.activo !== false && 
+              p.visible_tpv !== false &&
+              perteneceAMarca &&
+              p.tipoProducto?.toLowerCase().includes(categoriaASugerir);
+          })
           .slice(0, 3)
           .map(p => ({
             id: p.id,
             nombre: p.nombre,
             precio: p.precio,
             imagen: p.imagen || '',
-            categoria: p.categoria || '',
+            tipoProducto: p.tipoProducto || '',
+            submarcaId: p.submarcaId,
             stock: p.stock,
           }))
       : [];
@@ -233,7 +239,8 @@ export function CestaOverlay({ isOpen, onOpenChange, onProcederPago, userData }:
       precio: producto.precio,
       cantidad: 1,
       imagen: producto.imagen,
-      categoria: producto.categoria,
+      tipoProducto: producto.tipoProducto,
+      submarcaId: producto.submarcaId,
       stock: producto.stock,
     });
     toast.success(`${producto.nombre} añadido al carrito`);

@@ -10,10 +10,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ACTIVE_TENANT } from '../../config/tenant.config';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { ChevronRight, Check, X } from 'lucide-react';
+import { SelectorRapidoPerfiles } from '../SelectorRapidoPerfiles'; // ⭐ NUEVO
 
 interface OnboardingProps {
   onFinish: () => void;
   onSkip: () => void;
+  onLoginRapido?: (rol: 'cliente' | 'trabajador' | 'gerente') => void; // ⭐ NUEVO
 }
 
 // Imágenes profesionales de Unsplash para HoyPecamos (pizzas/burgers)
@@ -24,7 +26,7 @@ const backgroundImages = [
   'https://images.unsplash.com/photo-1638981368648-d6279e23f294?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwaXp6YSUyMGNoZWYlMjBtYWtpbmclMjBwaXp6YSUyMG92ZW4lMjBwcm9mZXNzaW9uYWx8ZW58MXx8fHwxNzY0NjM0NDIwfDA&ixlib=rb-4.1.0&q=80&w=1080', // Pizzero profesional haciendo pizzas
 ];
 
-export function Onboarding({ onFinish, onSkip }: OnboardingProps) {
+export function Onboarding({ onFinish, onSkip, onLoginRapido }: OnboardingProps) {
   const { branding, texts } = ACTIVE_TENANT;
   const [currentScreen, setCurrentScreen] = useState(0);
   const slides = texts.onboarding.slides;
@@ -184,9 +186,9 @@ export function Onboarding({ onFinish, onSkip }: OnboardingProps) {
       </div>
 
       {/* Footer con indicadores y botón - POSICIÓN FIJA */}
-      <div className="fixed bottom-0 md:bottom-12 left-0 right-0 z-20 px-6 pb-8 md:pb-12 space-y-6" style={{ backgroundColor: 'transparent' }}>
+      <div className="fixed bottom-0 md:bottom-12 left-0 right-0 z-20 px-6 pb-8 md:pb-12 space-y-6 pointer-events-none" style={{ backgroundColor: 'transparent' }}>
         {/* Indicadores de progreso */}
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center gap-2 pointer-events-auto">
           {slides.map((_, index) => (
             <motion.button
               key={index}
@@ -212,7 +214,7 @@ export function Onboarding({ onFinish, onSkip }: OnboardingProps) {
         <motion.button
           onClick={handleNext}
           whileTap={{ scale: 0.98 }}
-          className="w-full h-14 rounded-2xl flex items-center justify-center gap-2 transition-all touch-manipulation"
+          className="w-full h-14 rounded-2xl flex items-center justify-center gap-2 transition-all touch-manipulation pointer-events-auto"
           style={{
             backgroundColor: branding.colors.primary,
             color: branding.colors.primaryForeground,
@@ -248,6 +250,20 @@ export function Onboarding({ onFinish, onSkip }: OnboardingProps) {
           )}
         </div>
       </div>
+
+      {/* ⭐ NUEVO: Selector de perfiles para desarrollo/testing */}
+      {onLoginRapido && (
+        <SelectorRapidoPerfiles
+          currentRole={null}
+          onCambiarRol={() => {}} // No usado en modo login rápido
+          branding={{
+            primaryColor: branding.colors.primary,
+            secondaryColor: branding.colors.background
+          }}
+          modoLoginRapido={true}
+          onLoginRapido={onLoginRapido}
+        />
+      )}
     </div>
   );
 }

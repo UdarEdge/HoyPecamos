@@ -430,7 +430,7 @@ export function ChatGerente() {
                   <div
                     className={`p-3 rounded-lg ${
                       msg.rol === 'gerente' && msg.autor === gerenteNombre
-                        ? 'bg-teal-600 text-white'
+                        ? 'bg-[#ED1C24] text-white'
                         : 'bg-gray-100 text-gray-900'
                     }`}
                   >
@@ -470,7 +470,7 @@ export function ChatGerente() {
                 />
                 <Button
                   onClick={handleEnviarMensaje}
-                  className="bg-teal-600 hover:bg-teal-700 self-end"
+                  className="bg-[#ED1C24] hover:bg-[#c91820] text-white self-end h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                   disabled={!mensaje.trim()}
                 >
                   <Send className="w-4 h-4" />

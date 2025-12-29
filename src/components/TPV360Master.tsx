@@ -65,6 +65,7 @@ import {
   MARCAS, 
   EMPRESAS_ARRAY,
   MARCAS_ARRAY,
+  SUBMARCAS_ARRAY,
   getNombreEmpresa,
   getNombreMarca 
 } from '../constants/empresaConfig';
@@ -100,12 +101,13 @@ export interface PermisosTPV {
 interface Producto {
   id: string;
   nombre: string;
-  categoria: string;
+  submarcaId: string; // ⭐ Nueva arquitectura: submarca en lugar de marcas_ids
+  submarca_nombre?: string;
+  tipoProducto?: string; // Tipo de producto (opcional)
   precio: number;
   stock: number;
   descripcion?: string;
   imagen?: string;
-  marcas_ids?: string[]; // ⭐ Marcas donde está disponible
   activo?: boolean; // ⭐ Si está activo para venta
   visible_tpv?: boolean; // ⭐ Si es visible en TPV
 }
@@ -174,7 +176,9 @@ interface TPV360MasterProps {
 // HELPER: IMÁGENES POR CATEGORÍA
 // ============================================
 
-const getImagenPorCategoria = (categoria: string): string => {
+const getImagenPorTipo = (tipoProducto: string): string => {
+  // Función helper para obtener imagen por tipo de producto
+  const categoria = tipoProducto; // Mantenemos compatibilidad temporal
   const imagenesCategoria: Record<string, string> = {
     'Pan básico': 'https://images.unsplash.com/photo-1568471382005-99e347e2aef0?w=600',
     'Pan de masa madre': 'https://images.unsplash.com/photo-1610307522769-f923139bac30?w=600',
@@ -228,7 +232,7 @@ export function TPV360Master({
   } = usePromocionesTPV();
   
   // 🛍️ Hook de productos centralizados
-  const { productos: productosContext, categorias: categoriasContext } = useProductos();
+  const { productos: productosContext } = useProductos();
   
   // Estados de promociones
   const [promocionesAplicadasActuales, setPromocionesAplicadasActuales] = useState<PromocionDisponible[]>([]);
@@ -248,6 +252,13 @@ export function TPV360Master({
   const [pedidoPagado, setPedidoPagado] = useState(false);
   const [productoPersonalizable, setProductoPersonalizable] = useState<Producto | null>(null); // 🎯 Modal personalización
   const [showPersonalizacion, setShowPersonalizacion] = useState(false);
+  
+  // ✅ Estados para búsqueda de cliente
+  const [telefonoCliente, setTelefonoCliente] = useState('');
+  const [nombreCliente, setNombreCliente] = useState('');
+  const [emailCliente, setEmailCliente] = useState('');
+  const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
+  const [buscandoCliente, setBuscandoCliente] = useState(false);
   
   // Estados de caja
   const [estadoCaja, setEstadoCaja] = useState<EstadoCaja>({
@@ -317,118 +328,8 @@ export function TPV360Master({
   ]);
 
   // ⭐ PRODUCTOS SIMULADOS CON MARCAS (temporal - luego se conectará con GestionProductos)
-  const PRODUCTOS_TPV_MOCK: Producto[] = [
-    {
-      id: 'prod-001',
-      nombre: 'Pan de Masa Madre',
-      categoria: 'Pan de masa madre',
-      precio: 3.50,
-      stock: 25,
-      descripcion: 'Pan artesanal de masa madre',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-002',
-      nombre: 'Croissant de Mantequilla',
-      categoria: 'Bollería simple',
-      precio: 1.80,
-      stock: 40,
-      descripcion: 'Croissant francés con mantequilla natural',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-003',
-      nombre: 'Café Americano',
-      categoria: 'Bebidas calientes',
-      precio: 1.50,
-      stock: 100,
-      descripcion: 'Café americano recién hecho',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO, MARCAS.BLACKBURGUER], // ⭐ En ambas marcas
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-004',
-      nombre: 'Tarta de Zanahoria',
-      categoria: 'Pasteles individuales',
-      precio: 4.50,
-      stock: 12,
-      descripcion: 'Tarta casera de zanahoria con crema de queso',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-005',
-      nombre: 'Bocadillo de Jamón Ibérico',
-      categoria: 'Bocadillos',
-      precio: 5.50,
-      stock: 8,
-      descripcion: 'Bocadillo de pan recién hecho con jamón ibérico',
-      imagen: '',
-      marcas_ids: [MARCAS.BLACKBURGUER], // Solo en Blackburguer
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-006',
-      nombre: 'Coca-Cola 33cl',
-      categoria: 'Bebidas frías',
-      precio: 2.50,
-      stock: 50,
-      descripcion: 'Coca-Cola lata 33cl',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO, MARCAS.BLACKBURGUER], // ⭐ En ambas marcas
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-007',
-      nombre: 'Menú Desayuno Completo',
-      categoria: 'Combos',
-      precio: 2.80,
-      stock: 999, // Combos siempre disponibles
-      descripcion: 'Croissant + Café + Zumo',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-008',
-      nombre: 'Hamburguesa Clásica',
-      categoria: 'Hamburguesas',
-      precio: 7.50,
-      stock: 15,
-      descripcion: 'Hamburguesa 180g con queso, lechuga y tomate',
-      imagen: '',
-      marcas_ids: [MARCAS.BLACKBURGUER], // Solo en Blackburguer
-      activo: true,
-      visible_tpv: true
-    },
-    {
-      id: 'prod-009',
-      nombre: 'Napolitana de Chocolate',
-      categoria: 'Bollería simple',
-      precio: 2.00,
-      stock: 3, // ⚠️ Stock bajo
-      descripcion: 'Napolitana rellena de chocolate',
-      imagen: '',
-      marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-      activo: true,
-      visible_tpv: true
-    },
-  ];
-  
-  // ⭐ Usamos productos del contexto en lugar de mock local
+  // ⭐ PRODUCTOS MOCK ELIMINADOS - Ahora se cargan desde Supabase vía ProductosContext
+  // Los productos vienen del contexto con la nueva estructura de submarcas
   const productos = productosContext;
 
   // ============================================
@@ -448,8 +349,8 @@ export function TPV360Master({
       // Verificar si la promo es para este producto específico
       if (promo.productoIdAplicable === producto.id) return true;
       
-      // Verificar si la promo es para la categoría del producto
-      if (promo.categoriaAplicable === producto.categoria) return true;
+      // Verificar si la promo es para el tipo de producto
+      if (promo.categoriaAplicable === producto.tipoProducto) return true;
       
       // Verificar si el producto está en un combo
       if (promo.tipo === 'combo_pack' && promo.productosIncluidos) {
@@ -483,36 +384,41 @@ export function TPV360Master({
     };
   }, [promocionesDisponibles]);
 
-  // ⭐ Categorías dinámicas del contexto + 'todos' y 'promociones'
-  const categorias = useMemo(() => ['todos', 'promociones', ...categoriasContext], [categoriasContext]);
+  // ⭐ Tipos de producto dinámicos + 'todos' y 'promociones'
+  const tiposProducto = useMemo(() => {
+    const tipos = Array.from(new Set(productos.map(p => p.tipoProducto).filter(Boolean)));
+    return ['todos', 'promociones', ...tipos];
+  }, [productos]);
 
-  // ⭐ FILTRADO POR MARCA, CATEGORÍA Y BÚSQUEDA (incluye filtro de promociones)
+  // ⭐ FILTRADO POR SUBMARCA, TIPO Y BÚSQUEDA (incluye filtro de promociones)
   const productosFiltrados = productos.filter(producto => {
     const matchBusqueda = producto.nombre.toLowerCase().includes(searchQuery.toLowerCase());
     
     // Si la categoría es 'promociones', solo mostrar productos con promoción activa
-    let matchCategoria = true;
+    let matchTipo = true;
     if (categoriaActiva === 'promociones') {
       const tienePromocion = verificarPromocionProducto(producto).tienePromo;
-      matchCategoria = tienePromocion;
+      matchTipo = tienePromocion;
     } else {
-      matchCategoria = categoriaActiva === 'todos' || producto.categoria === categoriaActiva;
+      matchTipo = categoriaActiva === 'todos' || producto.tipoProducto === categoriaActiva;
     }
     
-    const matchMarca = !producto.marcas_ids || producto.marcas_ids.includes(marcaActivaLocal);
+    // ⭐ Nuevo filtrado por submarca (la submarca debe corresponder a la marca activa)
+    const submarcaDelProducto = SUBMARCAS_ARRAY.find(s => s.id === producto.submarcaId);
+    const matchMarca = submarcaDelProducto ? submarcaDelProducto.marcaId === marcaActivaLocal : false;
     const esActivo = producto.activo !== false;
     const esVisibleTPV = producto.visible_tpv !== false;
     
-    return matchBusqueda && matchCategoria && matchMarca && esActivo && esVisibleTPV;
+    return matchBusqueda && matchTipo && matchMarca && esActivo && esVisibleTPV;
   });
 
   // Contador de productos por marca
   const contadorProductosMarca = useMemo(() => {
-    return productos.filter(p => 
-      (!p.marcas_ids || p.marcas_ids.includes(marcaActivaLocal)) && 
-      p.activo !== false && 
-      p.visible_tpv !== false
-    ).length;
+    return productos.filter(p => {
+      const submarcaDelProducto = SUBMARCAS_ARRAY.find(s => s.id === p.submarcaId);
+      const perteneceAMarca = submarcaDelProducto ? submarcaDelProducto.marcaId === marcaActivaLocal : false;
+      return perteneceAMarca && p.activo !== false && p.visible_tpv !== false;
+    }).length;
   }, [productos, marcaActivaLocal]);
 
   // ============================================
@@ -729,7 +635,8 @@ export function TPV360Master({
           nombre: item.producto.nombre,
           precio: item.producto.precio,
           cantidad: item.cantidad,
-          categoria: item.producto.categoria
+          tipoProducto: item.producto.tipoProducto || '',
+          submarcaId: item.producto.submarcaId
         }));
 
         const resultado = aplicarDescuentosAutomaticos(carritoServicio);
@@ -782,16 +689,92 @@ export function TPV360Master({
     return `P${numero}`;
   };
 
-  const iniciarPedido = () => {
-    if (!clienteSeleccionado) {
-      const clienteAnonimo: Cliente = {
-        id: `CLI-${Date.now()}`,
-        nombre: 'Cliente sin datos',
-        telefono: 'N/A'
-      };
-      setClienteSeleccionado(clienteAnonimo);
+  // ✅ Abrir modal de cliente antes de iniciar pedido
+  const abrirModalCliente = () => {
+    setModalCliente(true);
+    setTelefonoCliente('');
+    setNombreCliente('');
+    setEmailCliente('');
+    setClienteEncontrado(null);
+  };
+
+  // ✅ Buscar cliente por teléfono
+  const buscarClientePorTelefono = async () => {
+    if (!telefonoCliente || telefonoCliente.length < 9) {
+      toast.error('Introduce un número de teléfono válido');
+      return;
     }
+
+    setBuscandoCliente(true);
     
+    // Simular búsqueda en base de datos
+    // 🔌 CONEXIÓN BACKEND: await fetch('/api/clientes/buscar', { telefono })
+    setTimeout(() => {
+      // Mock: Clientes existentes
+      const clientesMock: Cliente[] = [
+        { id: 'CLI001', nombre: 'María García', telefono: '678123456', email: 'maria@email.com' },
+        { id: 'CLI002', nombre: 'Carlos Martínez', telefono: '645987321', email: 'carlos@email.com' },
+        { id: 'CLI003', nombre: 'Ana López', telefono: '612345678', email: 'ana@email.com' }
+      ];
+
+      const clienteExistente = clientesMock.find(c => c.telefono === telefonoCliente);
+
+      if (clienteExistente) {
+        setClienteEncontrado(clienteExistente);
+        setNombreCliente(clienteExistente.nombre);
+        setEmailCliente(clienteExistente.email || '');
+        toast.success(`Cliente encontrado: ${clienteExistente.nombre}`);
+      } else {
+        setClienteEncontrado(null);
+        setNombreCliente('');
+        setEmailCliente('');
+        toast.info('Cliente no encontrado. Introduce los datos para crear uno nuevo');
+      }
+      setBuscandoCliente(false);
+    }, 800);
+  };
+
+  // ✅ Confirmar y continuar con el pedido
+  const confirmarCliente = () => {
+    if (!telefonoCliente || !nombreCliente) {
+      toast.error('Introduce al menos teléfono y nombre del cliente');
+      return;
+    }
+
+    let clienteFinal: Cliente;
+
+    if (clienteEncontrado) {
+      // Cliente existente
+      clienteFinal = clienteEncontrado;
+    } else {
+      // Crear nuevo cliente
+      clienteFinal = {
+        id: `CLI-${Date.now()}`,
+        nombre: nombreCliente,
+        telefono: telefonoCliente,
+        email: emailCliente || undefined
+      };
+
+      // 🔌 CONEXIÓN BACKEND: await fetch('/api/clientes/crear', clienteFinal)
+      toast.success(`Nuevo cliente creado: ${nombreCliente}`);
+    }
+
+    setClienteSeleccionado(clienteFinal);
+    const codigoTurno = generarCodigoTurno();
+    setTurnoAsignado(codigoTurno);
+    setPedidoIniciado(true);
+    setModalCliente(false);
+    toast.success(`Pedido iniciado - Turno ${codigoTurno}`);
+  };
+
+  // ✅ Continuar sin cliente (anónimo)
+  const continuarSinCliente = () => {
+    const clienteAnonimo: Cliente = {
+      id: `CLI-ANONIMO-${Date.now()}`,
+      nombre: 'Cliente sin datos',
+      telefono: 'N/A'
+    };
+    setClienteSeleccionado(clienteAnonimo);
     const codigoTurno = generarCodigoTurno();
     setTurnoAsignado(codigoTurno);
     setPedidoIniciado(true);
@@ -1495,11 +1478,11 @@ export function TPV360Master({
                                 if (!marca) return null;
                                 
                                 const isActive = marcaActivaLocal === marcaId;
-                                const contadorProductos = productos.filter(p => 
-                                  (!p.marcas_ids || p.marcas_ids.includes(marcaId)) && 
-                                  p.activo !== false && 
-                                  p.visible_tpv !== false
-                                ).length;
+                                const contadorProductos = productos.filter(p => {
+                                  const submarcaDelProd = SUBMARCAS_ARRAY.find(s => s.id === p.submarcaId);
+                                  const perteneceAMarca = submarcaDelProd ? submarcaDelProd.marcaId === marcaId : false;
+                                  return perteneceAMarca && p.activo !== false && p.visible_tpv !== false;
+                                }).length;
                                 
                                 return (
                                   <button
@@ -1554,7 +1537,7 @@ export function TPV360Master({
 
                           {/* Filtros de categorías - SIN SCROLL HORIZONTAL */}
                           <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                            {categorias.map(cat => {
+                            {tiposProducto.map(cat => {
                               const isPromo = cat === 'promociones';
                               const isActive = categoriaActiva === cat;
                               
@@ -1645,7 +1628,7 @@ export function TPV360Master({
                                 {/* Imagen del producto - SOLO DESKTOP */}
                                 <div className="hidden sm:block w-full h-36 sm:h-40 mb-3 rounded-xl overflow-hidden bg-gray-100">
                                   <ImageWithFallback
-                                    src={producto.imagen || getImagenPorCategoria(producto.categoria)}
+                                    src={producto.imagen || getImagenPorTipo(producto.tipoProducto || '')}
                                     alt={producto.nombre}
                                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                                   />
@@ -1709,7 +1692,7 @@ export function TPV360Master({
                           {/* Botón Empezar / Info del turno */}
                           {!pedidoIniciado ? (
                             <Button
-                              onClick={iniciarPedido}
+                              onClick={abrirModalCliente}
                               className="w-full bg-teal-600 hover:bg-teal-700"
                             >
                               <Plus className="w-4 h-4 mr-2" />
@@ -1984,7 +1967,7 @@ export function TPV360Master({
               {!pedidoIniciado ? (
                 <Button
                   onClick={() => {
-                    iniciarPedido();
+                    abrirModalCliente();
                     setCarritoMovilAbierto(false);
                   }}
                   className="w-full bg-teal-600 hover:bg-teal-700 mt-3"
@@ -2316,6 +2299,132 @@ export function TPV360Master({
             }}
           />
         )}
+
+        {/* ✅ Modal Búsqueda/Registro de Cliente */}
+        <Dialog open={modalCliente} onOpenChange={setModalCliente}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <User className="w-5 h-5 text-teal-600" />
+                Datos del Cliente
+              </DialogTitle>
+              <DialogDescription>
+                Busca el cliente por teléfono o crea uno nuevo
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {/* Búsqueda por teléfono */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Teléfono</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="tel"
+                    placeholder="Ej: 612345678"
+                    value={telefonoCliente}
+                    onChange={(e) => setTelefonoCliente(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') buscarClientePorTelefono();
+                    }}
+                    className="flex-1"
+                    autoFocus
+                  />
+                  <Button
+                    onClick={buscarClientePorTelefono}
+                    disabled={buscandoCliente || telefonoCliente.length < 9}
+                    className="bg-teal-600 hover:bg-teal-700"
+                  >
+                    {buscandoCliente ? (
+                      <>
+                        <span className="animate-spin mr-2">⌛</span>
+                        Buscando...
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4 mr-2" />
+                        Buscar
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Resultado de búsqueda */}
+              {clienteEncontrado && (
+                <div className="bg-green-50 border-2 border-green-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Check className="w-5 h-5 text-green-600" />
+                    <span className="font-semibold text-green-800">Cliente encontrado</span>
+                  </div>
+                  <div className="text-sm text-green-700 space-y-1">
+                    <p><strong>Nombre:</strong> {clienteEncontrado.nombre}</p>
+                    <p><strong>Teléfono:</strong> {clienteEncontrado.telefono}</p>
+                    {clienteEncontrado.email && (
+                      <p><strong>Email:</strong> {clienteEncontrado.email}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Datos del cliente (nombre y email) */}
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Nombre completo
+                    {!clienteEncontrado && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder="Ej: María García"
+                    value={nombreCliente}
+                    onChange={(e) => setNombreCliente(e.target.value)}
+                    disabled={!!clienteEncontrado}
+                    className={clienteEncontrado ? 'bg-gray-100' : ''}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Email (opcional)</label>
+                  <Input
+                    type="email"
+                    placeholder="Ej: maria@email.com"
+                    value={emailCliente}
+                    onChange={(e) => setEmailCliente(e.target.value)}
+                    disabled={!!clienteEncontrado}
+                    className={clienteEncontrado ? 'bg-gray-100' : ''}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button
+                variant="outline"
+                onClick={continuarSinCliente}
+                className="w-full sm:w-auto"
+              >
+                Continuar sin cliente
+              </Button>
+              <Button
+                onClick={confirmarCliente}
+                disabled={!telefonoCliente || !nombreCliente}
+                className="w-full sm:w-auto bg-teal-600 hover:bg-teal-700"
+              >
+                {clienteEncontrado ? (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Confirmar y continuar
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Crear cliente y continuar
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Modal Operaciones TPV */}
         <ModalOperacionesTPV

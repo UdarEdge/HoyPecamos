@@ -171,7 +171,7 @@ export function ConfiguracionEmpresas() {
             </div>
             <Button
               onClick={() => setModalCrearEmpresaOpen(true)}
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
               size="sm"
             >
               <Plus className="w-4 h-4 mr-2" />

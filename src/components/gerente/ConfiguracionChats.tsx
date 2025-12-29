@@ -304,7 +304,7 @@ export function ConfiguracionChats() {
                   e.stopPropagation();
                   handleNuevaCategoriaCliente();
                 }}
-                className="bg-teal-600 hover:bg-teal-700"
+                className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Añadir nueva categoría
@@ -481,7 +481,7 @@ export function ConfiguracionChats() {
                   e.stopPropagation();
                   handleNuevaCategoria();
                 }}
-                className="bg-teal-600 hover:bg-teal-700"
+                className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Añadir nueva categoría

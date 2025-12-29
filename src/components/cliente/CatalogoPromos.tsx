@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useProductos } from '../../contexts/ProductosContext';
 import { useCart } from '../../contexts/CartContext';
 import { usePromociones, type PromocionDisponible } from '../../hooks/usePromociones';
+import { SUBMARCAS_ARRAY, MARCAS } from '../../constants/empresaConfig';
 import { toast } from 'sonner@2.0.3';
 import { 
   Search, 
@@ -29,7 +30,9 @@ import { EventoModal } from './EventoModal';
 interface Producto {
   id: string;
   nombre: string;
-  categoria: string;
+  submarcaId: string;
+  submarca_nombre?: string;
+  tipoProducto?: string;
   precio: number;
   precioAnterior?: number;
   stock: number;
@@ -65,20 +68,22 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
   const marcaIdActual = MARCA_ID_MAP[marcaSeleccionada] || 'MRC-002';
   
   // 🛍️ Hook de productos centralizados - ✅ CONECTADO AL GERENTE
-  const { productos: productosContext, categorias: categoriasContext } = useProductos();
+  const { productos: productosContext } = useProductos();
 
   // ✅ PRODUCTOS AHORA VIENEN DEL CONTEXTO (sincronizados con el gerente)
-  // ✅ FILTRADOS POR MARCA SELECCIONADA
+  // ✅ FILTRADOS POR MARCA SELECCIONADA usando submarcas
   const productos: Producto[] = productosContext
-    .filter(p => 
-      p.activo !== false && 
-      p.visible_tpv !== false &&
-      p.marcas_ids?.includes(marcaIdActual) // 🔥 Filtro por marca
-    )
+    .filter(p => {
+      const submarcaDelProd = SUBMARCAS_ARRAY.find(s => s.id === p.submarcaId);
+      const perteneceAMarca = submarcaDelProd ? submarcaDelProd.marcaId === marcaIdActual : false;
+      return p.activo !== false && p.visible_tpv !== false && perteneceAMarca;
+    })
     .map(p => ({
       id: p.id,
       nombre: p.nombre,
-      categoria: p.categoria || 'Otros',
+      submarcaId: p.submarcaId,
+      submarca_nombre: p.submarca_nombre,
+      tipoProducto: p.tipoProducto || 'Otros',
       precio: p.precio,
       stock: p.stock,
       descripcion: p.descripcion || '',
@@ -86,25 +91,26 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
       imagen: p.imagen || ''
     }));
 
-  // ✅ CATEGORÍAS FILTRADAS - Solo las que tienen productos en la marca actual
-  const categorias = Array.from(new Set(productos.map(p => p.categoria)));
+  // ✅ TIPOS DE PRODUCTO - Solo los que tienen productos en la marca actual
+  const tiposProducto = Array.from(new Set(productos.map(p => p.tipoProducto).filter(Boolean)));
 
   // 🔍 Filtrado de productos
   const productosFiltrados = productos.filter(producto => {
     // Filtro por búsqueda
     const matchBusqueda = searchQuery === '' || 
       producto.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      producto.categoria.toLowerCase().includes(searchQuery.toLowerCase());
+      (producto.tipoProducto && producto.tipoProducto.toLowerCase().includes(searchQuery.toLowerCase()));
     
-    // Filtro por categoría - comparación case-insensitive
-    const matchCategoria = categoriaFiltro === 'todos' || producto.categoria.toLowerCase() === categoriaFiltro.toLowerCase();
+    // Filtro por tipo de producto - comparación case-insensitive
+    const matchTipo = categoriaFiltro === 'todos' || 
+      (producto.tipoProducto && producto.tipoProducto.toLowerCase() === categoriaFiltro.toLowerCase());
     
-    return matchBusqueda && matchCategoria;
+    return matchBusqueda && matchTipo;
   });
 
   const handleAnadirCarrito = (producto: Producto) => {
     // 🎉 EVENTOS - Abrir modal especial
-    if (marcaSeleccionada === 'eventos' || producto.categoria?.toLowerCase().includes('evento')) {
+    if (marcaSeleccionada === 'eventos' || producto.tipoProducto?.toLowerCase().includes('evento')) {
       setProductoEventoSeleccionado(producto);
       setEventoModalOpen(true);
       return;
@@ -117,7 +123,8 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
       precio: producto.precio,
       cantidad: 1,
       imagen: producto.imagen,
-      categoria: producto.categoria,
+      tipoProducto: producto.tipoProducto || '',
+      submarcaId: producto.submarcaId,
       stock: producto.stock,
     });
     
@@ -125,15 +132,15 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
     onOpenCesta?.();
     
     // Si es un COMBO → expandir personalización automáticamente
-    if (producto.categoria === 'Combos') {
+    if (producto.tipoProducto === 'Combos') {
       localStorage.setItem('combo_a_personalizar', itemId || '');
     }
   };
 
 
 
-  const getCategoriaIcon = (categoria: string) => {
-    switch (categoria.toLowerCase()) {
+  const getTipoProductoIcon = (tipoProducto: string) => {
+    switch (tipoProducto.toLowerCase()) {
       case 'combos':
         return <Package className="w-5 h-5" />;
       case 'burgers':
@@ -172,19 +179,19 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
 
       {/* Filtros visuales de categorías */}
       <div className="flex gap-1.5 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-        {categorias.map((cat) => (
+        {tiposProducto.map((tipo) => (
           <Button
-            key={cat}
-            variant={categoriaFiltro === cat.toLowerCase() ? 'default' : 'outline'}
+            key={tipo}
+            variant={categoriaFiltro === tipo.toLowerCase() ? 'default' : 'outline'}
             size="sm"
             className={`flex-shrink-0 px-2.5 py-0.5 h-7 text-xs ${
-              categoriaFiltro === cat.toLowerCase() 
+              categoriaFiltro === tipo.toLowerCase() 
                 ? 'bg-teal-600 hover:bg-teal-700 text-white' 
                 : 'hover:bg-gray-50'
             }`}
-            onClick={() => setCategoriaFiltro(cat.toLowerCase())}
+            onClick={() => setCategoriaFiltro(tipo.toLowerCase())}
           >
-            {cat}
+            {tipo}
           </Button>
         ))}
 
@@ -225,7 +232,7 @@ export function CatalogoPromos({ onOpenCesta }: CatalogoPromosProps = {}) {
                 />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center">
-                  {getCategoriaIcon(producto.categoria)}
+                  {getTipoProductoIcon(producto.tipoProducto || '')}
                 </div>
               )}
               {producto.destacado && (

@@ -11,17 +11,21 @@ import { Checkbox } from '../ui/checkbox';
 import { 
   EMPRESAS_ARRAY,
   MARCAS_ARRAY,
+  SUBMARCAS_ARRAY,
   PUNTOS_VENTA_ARRAY,
   getNombreEmpresa,
   getNombrePDVConMarcas,
   getNombreMarca,
+  getNombreSubmarca,
+  getIconoSubmarca,
   getIconoMarca,
   EMPRESAS,
   MARCAS,
+  SUBMARCAS,
   PUNTOS_VENTA
 } from '../../constants/empresaConfig';
 import { useStock } from '../../contexts/StockContext';
-import { useProductos, CATEGORIAS_PRODUCTOS } from '../../contexts/ProductosContext';
+import { useProductos, TIPOS_PRODUCTO } from '../../contexts/ProductosContext';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -82,16 +86,18 @@ interface Producto {
   sku: string;
   nombre: string;
   descripcion: string;
-  categoria: string;
   
-  // ⭐ NUEVOS CAMPOS: TIPO DE PRODUCTO
+  // ⭐ CAMBIO: categoria → submarcaId
+  submarcaId: string; // ID de la submarca (ej: "SUB-MODOMIO", "SUB-BLACKBURGER")
+  submarca_nombre?: string; // Nombre de la submarca para visualización
+  
+  // ⭐ TIPO DE PRODUCTO (opcional, para clasificación)
+  tipoProducto?: string; // "Combo", "Burger", "Pizza", etc.
   tipo_producto: 'simple' | 'manufacturado' | 'combo';
   
-  // ⭐ NUEVOS CAMPOS: MULTI-EMPRESA Y MULTI-MARCA
+  // ⭐ NUEVOS CAMPOS: MULTI-EMPRESA
   empresa_id: string;
   empresa_nombre: string;
-  marcas_ids: string[]; // ⭐ Array: producto puede estar en VARIAS marcas
-  marcas_nombres: string[]; // ⭐ Array: nombres de las marcas
   punto_venta_id?: string; // Opcional: catálogo global o específico de tienda
   
   // ⭐ NUEVOS CAMPOS: RELACIONES
@@ -151,262 +157,16 @@ interface EscandalloDisponible {
   costo_envases: number;
   costo_total: number;
   empresa_id: string;
-  marcas_ids: string[];
+  submarcaId: string; // ⭐ Cambio: marcas_ids → submarcaId
 }
 
 const ESCANDALLOS_DISPONIBLES: EscandalloDisponible[] = [
-  {
-    id: 'ESC-PAN-001',
-    nombre_producto: 'Pan de Masa Madre',
-    costo_ingredientes: 1.05,
-    costo_envases: 0.15,
-    costo_total: 1.20,
-    empresa_id: EMPRESAS.DISARMINK,
-    marcas_ids: [MARCAS.MODOMIO]
-  },
-  {
-    id: 'ESC-CROIS-001',
-    nombre_producto: 'Croissant de Mantequilla',
-    costo_ingredientes: 0.40,
-    costo_envases: 0.05,
-    costo_total: 0.45,
-    empresa_id: EMPRESAS.DISARMINK,
-    marcas_ids: [MARCAS.MODOMIO]
-  },
-  {
-    id: 'ESC-TARTA-001',
-    nombre_producto: 'Tarta de Zanahoria',
-    costo_ingredientes: 1.65,
-    costo_envases: 0.15,
-    costo_total: 1.80,
-    empresa_id: EMPRESAS.DISARMINK,
-    marcas_ids: [MARCAS.MODOMIO]
-  },
-  {
-    id: 'ESC-BOC-001',
-    nombre_producto: 'Bocadillo de Jamón Ibérico',
-    costo_ingredientes: 2.30,
-    costo_envases: 0.20,
-    costo_total: 2.50,
-    empresa_id: EMPRESAS.DISARMINK,
-    marcas_ids: [MARCAS.BLACKBURGUER]
-  },
-  {
-    id: 'ESC-CAFE-001',
-    nombre_producto: 'Café con Leche',
-    costo_ingredientes: 0.12,
-    costo_envases: 0.03,
-    costo_total: 0.15,
-    empresa_id: EMPRESAS.DISARMINK,
-    marcas_ids: [MARCAS.MODOMIO, MARCAS.BLACKBURGUER] // ⭐ En ambas marcas
-  },
+  // ⭐ COMENTADO: Estos mocks ya no se usan, los escandallos se gestionan desde Supabase
+  // Se mantiene el array vacío para evitar errores en el código existente
 ];
 
-const PRODUCTOS_MOCK: Producto[] = [
-  {
-    // Producto MANUFACTURADO con receta - SOLO EN MODOMIO
-    id: 'prod-001',
-    sku: 'PAN-001',
-    nombre: 'Pan de Masa Madre',
-    descripcion: 'Pan artesanal de masa madre con fermentación lenta de 24h',
-    categoria: 'Pan de masa madre',
-    tipo_producto: 'manufacturado',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO], // Solo en Modomio
-    marcas_nombres: ['Modomio'],
-    escandallo_id: 'ESC-PAN-001',
-    costo_ingredientes: 1.05,
-    costo_envases: 0.15,
-    costo_total: 1.20,
-    margen_bruto_pct: 65.7,
-    precio: 3.50,
-    precio_compra: 1.20,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: true,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    peso: 0.5,
-    unidad: 'kg',
-    fecha_creacion: new Date('2024-01-15'),
-    fecha_modificacion: new Date('2024-11-20')
-  },
-  {
-    // Producto MANUFACTURADO - SOLO EN MODOMIO
-    id: 'prod-002',
-    sku: 'BOL-001',
-    nombre: 'Croissant de Mantequilla',
-    descripcion: 'Croissant francés con mantequilla 100% natural',
-    categoria: 'Bollería simple',
-    tipo_producto: 'manufacturado',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO],
-    marcas_nombres: ['Modomio'],
-    escandallo_id: 'ESC-CROIS-001',
-    costo_ingredientes: 0.33, // ⚠️ Desactualizado (escandallo: 0.40)
-    costo_envases: 0.05,
-    costo_total: 0.38, // ⚠️ Desactualizado (escandallo: 0.45)
-    margen_bruto_pct: 78.9, // Calculado con costo antiguo
-    precio: 1.80,
-    precio_compra: 0.38, // ⚠️ Desactualizado
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: true,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-01-10'),
-    fecha_modificacion: new Date('2024-11-25')
-  },
-  {
-    // Producto SIMPLE - EN AMBAS MARCAS ⭐
-    id: 'prod-003',
-    sku: 'BEB-001',
-    nombre: 'Café Americano',
-    descripcion: 'Café americano recién hecho',
-    categoria: 'Bebidas calientes',
-    tipo_producto: 'simple',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO, MARCAS.BLACKBURGUER], // ⭐ En ambas marcas
-    marcas_nombres: ['Modomio', 'Blackburguer'],
-    articulo_stock_id: 'SKU-CAFE-GRA-001',
-    precio: 1.50,
-    precio_compra: 0.30,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: false,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-01-05'),
-    fecha_modificacion: new Date('2024-11-28')
-  },
-  {
-    // Producto MANUFACTURADO - SOLO EN MODOMIO
-    id: 'prod-004',
-    sku: 'PAS-001',
-    nombre: 'Tarta de Zanahoria',
-    descripcion: 'Tarta casera de zanahoria con crema de queso',
-    categoria: 'Pasteles individuales',
-    tipo_producto: 'manufacturado',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO],
-    marcas_nombres: ['Modomio'],
-    escandallo_id: 'ESC-TARTA-001',
-    costo_ingredientes: 1.65,
-    costo_envases: 0.15,
-    costo_total: 1.80,
-    margen_bruto_pct: 60,
-    precio: 4.50,
-    precio_compra: 1.80,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: true,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-02-01'),
-    fecha_modificacion: new Date('2024-11-27')
-  },
-  {
-    // Producto MANUFACTURADO - SOLO EN BLACKBURGUER
-    id: 'prod-005',
-    sku: 'BOC-001',
-    nombre: 'Bocadillo de Jamón Ibérico',
-    descripcion: 'Bocadillo de pan recién hecho con jamón ibérico',
-    categoria: 'Bocadillos',
-    tipo_producto: 'manufacturado',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.BLACKBURGUER],
-    marcas_nombres: ['Blackburguer'],
-    escandallo_id: 'ESC-BOC-001',
-    costo_ingredientes: 2.30,
-    costo_envases: 0.20,
-    costo_total: 2.50,
-    margen_bruto_pct: 54.5,
-    precio: 5.50,
-    precio_compra: 2.50,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: false,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-01-20'),
-    fecha_modificacion: new Date('2024-11-26')
-  },
-  {
-    // Producto SIMPLE - EN AMBAS MARCAS ⭐
-    id: 'prod-006',
-    sku: 'BEB-COCA-001',
-    nombre: 'Coca-Cola 33cl',
-    descripcion: 'Coca-Cola lata 33cl',
-    categoria: 'Bebidas frías',
-    tipo_producto: 'simple',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO, MARCAS.BLACKBURGUER], // ⭐ En ambas marcas
-    marcas_nombres: ['Modomio', 'Blackburguer'],
-    articulo_stock_id: 'SKU-COCA-001',
-    precio: 2.50,
-    precio_compra: 0.80,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: false,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 21,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-02-15'),
-    fecha_modificacion: new Date('2024-11-28')
-  },
-  {
-    // Producto COMBO - SOLO EN MODOMIO
-    id: 'prod-007',
-    sku: 'COMBO-001',
-    nombre: 'Menú Desayuno Completo',
-    descripcion: 'Croissant + Café + Zumo',
-    categoria: 'Combos',
-    tipo_producto: 'combo',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO],
-    marcas_nombres: ['Modomio'],
-    productos_incluidos: [
-      { producto_id: 'prod-002', cantidad: 1 },
-      { producto_id: 'prod-003', cantidad: 1 },
-    ],
-    costo_total: 0.75,
-    precio: 2.80,
-    precio_compra: 0.75,
-    stock: 0,
-    stock_minimo: 0,
-    activo: true,
-    destacado: true,
-    visible_app: true,
-    visible_tpv: true,
-    iva: 10,
-    unidad: 'unidad',
-    fecha_creacion: new Date('2024-03-01'),
-    fecha_modificacion: new Date('2024-11-28')
-  }
-];
+// ⭐ COMENTADO: Productos mock ya no se usan, se cargan desde Supabase
+const PRODUCTOS_MOCK: Producto[] = [];
 
 // ============================================
 // COMPONENTE PRINCIPAL
@@ -416,8 +176,7 @@ export function GestionProductos() {
   // Contextos
   const { stock: stockArticulos, getStockPorEmpresa } = useStock();
   const { 
-    productos: productosContext, 
-    categorias: categoriasContext,
+    productos: productosContext,
     agregarProducto,
     actualizarProducto,
     eliminarProducto 
@@ -426,7 +185,7 @@ export function GestionProductos() {
   // Estados - Ahora usa productos del contexto
   const [productos, setProductos] = useState<Producto[]>(productosContext);
   const [busqueda, setBusqueda] = useState('');
-  const [categoriaFiltro, setCategoriaFiltro] = useState<string>('todos');
+  const [submarcaFiltro, setSubmarcaFiltro] = useState<string>('todos');
   
   // ✅ Sincronizar con el contexto cuando cambie
   useEffect(() => {
@@ -449,12 +208,11 @@ export function GestionProductos() {
     sku: '',
     nombre: '',
     descripcion: '',
-    categoria: '',
+    submarcaId: 'SUB-MODOMIO', // ⭐ Default: Modomio
+    tipoProducto: '',
     tipo_producto: 'simple',
-    empresa_id: EMPRESAS.DISARMINK,
-    empresa_nombre: 'Disarmink SL - Hoy Pecamos',
-    marcas_ids: [MARCAS.MODOMIO], // ⭐ Array de marcas
-    marcas_nombres: ['Modomio'],
+    empresa_id: 'EMP-001',
+    empresa_nombre: 'Disarmink S.L. - Hoy Pecamos',
     precio: 0,
     precio_compra: 0,
     stock: 0,
@@ -472,20 +230,18 @@ export function GestionProductos() {
   // CÁLCULOS CON USEMEMO
   // ============================================
 
-  // ⭐ FILTRAR ESCANDALLOS según empresa y marcas del producto
+  // ⭐ FILTRAR ESCANDALLOS según empresa y submarca del producto
   const escandallosFiltrados = useMemo(() => {
-    if (!formData.empresa_id) return [];
+    if (!formData.empresa_id || !formData.submarcaId) return [];
     
     return ESCANDALLOS_DISPONIBLES.filter(esc => {
       // Debe pertenecer a la misma empresa
       const matchEmpresa = esc.empresa_id === formData.empresa_id;
       
-      // Debe tener al menos una marca en común
-      const tieneAlgunaMarcaEnComun = formData.marcas_ids?.some(marcaId => 
-        esc.marcas_ids.includes(marcaId)
-      );
+      // Debe pertenecer a la misma submarca (o marca compatible)
+      const matchSubmarca = esc.submarcaId === formData.submarcaId;
       
-      return matchEmpresa && tieneAlgunaMarcaEnComun;
+      return matchEmpresa && matchSubmarca;
     });
   }, [formData.empresa_id, formData.marcas_ids]);
 
@@ -538,7 +294,7 @@ export function GestionProductos() {
         p.sku.toLowerCase().includes(busqueda.toLowerCase()) ||
         p.descripcion.toLowerCase().includes(busqueda.toLowerCase());
       
-      const matchCategoria = categoriaFiltro === 'todos' || p.categoria === categoriaFiltro;
+      const matchSubmarca = submarcaFiltro === 'todos' || p.submarcaId === submarcaFiltro;
       
       const matchEstado = 
         estadoFiltro === 'todos' ? true :
@@ -548,9 +304,9 @@ export function GestionProductos() {
       // ⭐ NUEVOS FILTROS
       const matchTipo = tipoFiltro === 'todos' || p.tipo_producto === tipoFiltro;
       const matchEmpresa = empresaFiltro === 'todos' || p.empresa_id === empresaFiltro;
-      const matchMarca = marcaFiltro === 'todos' || p.marcas_ids.includes(marcaFiltro); // ⭐ Buscar en array
+      const matchMarca = marcaFiltro === 'todos' || (p.submarcaId && SUBMARCAS[p.submarcaId]?.marcaId === marcaFiltro);
       
-      return matchBusqueda && matchCategoria && matchEstado && matchTipo && matchEmpresa && matchMarca;
+      return matchBusqueda && matchSubmarca && matchEstado && matchTipo && matchEmpresa && matchMarca;
     }).sort((a, b) => {
       switch (ordenar) {
         case 'nombre':
@@ -565,7 +321,7 @@ export function GestionProductos() {
           return 0;
       }
     });
-  }, [productosCalculados, busqueda, categoriaFiltro, estadoFiltro, tipoFiltro, empresaFiltro, marcaFiltro, ordenar]);
+  }, [productosCalculados, busqueda, submarcaFiltro, estadoFiltro, tipoFiltro, empresaFiltro, marcaFiltro, ordenar]);
 
   const estadisticas = useMemo(() => {
     const activos = productos.filter(p => p.activo);
@@ -633,12 +389,12 @@ export function GestionProductos() {
 
   const guardarProducto = () => {
     // Validaciones básicas
-    if (!formData.nombre || !formData.categoria || !formData.sku) {
-      toast.error('Por favor completa los campos obligatorios');
+    if (!formData.nombre || !formData.submarcaId || !formData.sku) {
+      toast.error('Por favor completa los campos obligatorios (Nombre, SKU, Submarca)');
       return;
     }
 
-    if (!formData.tipo_producto || !formData.empresa_id || !formData.marcas_ids || formData.marcas_ids.length === 0) {
+    if (!formData.tipo_producto || !formData.empresa_id || !formData.submarcaId) {
       toast.error('Debes seleccionar tipo de producto, empresa y al menos una marca');
       return;
     }
@@ -658,18 +414,15 @@ export function GestionProductos() {
       return;
     }
 
-    // Actualizar nombres de empresa y marcas según los IDs
+    // Actualizar nombres de empresa y submarca según los IDs
     const empresaSeleccionada = EMPRESAS_ARRAY.find(e => e.id === formData.empresa_id);
-    const marcasNombres = formData.marcas_ids?.map(marcaId => {
-      const marca = MARCAS_ARRAY.find(m => m.id === marcaId);
-      return marca ? getNombreMarca(marca.id) : '';
-    }).filter(Boolean) || [];
+    const submarcaNombre = formData.submarcaId ? getNombreSubmarca(formData.submarcaId) : '';
 
     // ⭐ INCLUIR COSTOS CALCULADOS DESDE ESCANDALLO
     const datosActualizados = {
       ...formData,
       empresa_nombre: empresaSeleccionada ? getNombreEmpresa(empresaSeleccionada.id) : formData.empresa_nombre,
-      marcas_nombres: marcasNombres,
+      submarca_nombre: submarcaNombre,
       // ⭐ Añadir costos calculados
       costo_ingredientes: costosCalculados.costo_ingredientes,
       costo_envases: costosCalculados.costo_envases,
@@ -940,15 +693,17 @@ export function GestionProductos() {
                 />
               </div>
 
-              {/* Categoría */}
-              <Select value={categoriaFiltro} onValueChange={setCategoriaFiltro}>
+              {/* Submarca */}
+              <Select value={submarcaFiltro} onValueChange={setSubmarcaFiltro}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Categoría" />
+                  <SelectValue placeholder="Submarca" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todas las categorías</SelectItem>
-                  {categoriasContext.map(cat => (
-                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  <SelectItem value="todos">Todas las submarcas</SelectItem>
+                  {SUBMARCAS_ARRAY.map(submarca => (
+                    <SelectItem key={submarca.id} value={submarca.id}>
+                      {submarca.icono} {submarca.nombre}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1059,11 +814,9 @@ export function GestionProductos() {
                            producto.tipo_producto === 'manufacturado' ? '👨‍🍳 Manufacturado' : 
                            '📦 Combo'}
                         </Badge>
-                        {producto.marcas_nombres.map((marca, idx) => (
-                          <Badge key={idx} variant="outline" className="text-[10px] px-1 py-0 bg-teal-50 text-teal-700 border-teal-200">
-                            {marca}
-                          </Badge>
-                        ))}
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 bg-teal-50 text-teal-700 border-teal-200">
+                          {getIconoSubmarca(producto.submarcaId)} {getNombreSubmarca(producto.submarcaId)}
+                        </Badge>
                       </div>
                     </div>
                     <Badge variant={producto.activo ? 'default' : 'secondary'} className={producto.activo ? 'bg-green-100 text-green-800' : ''}>
@@ -1140,8 +893,8 @@ export function GestionProductos() {
                   <th className="text-left p-3 text-sm font-medium text-gray-600">Producto</th>
                   <th className="text-left p-3 text-sm font-medium text-gray-600">SKU</th>
                   <th className="text-left p-3 text-sm font-medium text-gray-600">Tipo</th>
-                  <th className="text-left p-3 text-sm font-medium text-gray-600">Marca</th>
-                  <th className="text-left p-3 text-sm font-medium text-gray-600">Categoría</th>
+                  <th className="text-left p-3 text-sm font-medium text-gray-600">Submarca</th>
+                  <th className="text-left p-3 text-sm font-medium text-gray-600">Tipo Producto</th>
                   <th className="text-right p-3 text-sm font-medium text-gray-600">Costo</th>
                   <th className="text-right p-3 text-sm font-medium text-gray-600">Precio</th>
                   <th className="text-right p-3 text-sm font-medium text-gray-600">Stock</th>
@@ -1180,17 +933,13 @@ export function GestionProductos() {
                       </Badge>
                     </td>
                     <td className="p-3">
-                      <div className="flex gap-1 flex-wrap">
-                        {producto.marcas_nombres.map((marca, idx) => (
-                          <Badge key={idx} variant="outline" className="text-xs bg-teal-50 text-teal-700 border-teal-200">
-                            {marca}
-                          </Badge>
-                        ))}
-                      </div>
+                      <Badge variant="outline" className="text-xs bg-teal-50 text-teal-700 border-teal-200">
+                        {getIconoSubmarca(producto.submarcaId)} {getNombreSubmarca(producto.submarcaId)}
+                      </Badge>
                     </td>
                     <td className="p-3">
                       <Badge variant="outline" className="text-xs">
-                        {producto.categoria}
+                        {producto.tipoProducto || '-'}
                       </Badge>
                     </td>
                     <td className="p-3 text-right">
@@ -1386,50 +1135,24 @@ export function GestionProductos() {
                 </div>
 
                 <div>
-                  <Label>Marcas * (puede seleccionar varias)</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        className="w-full justify-between"
-                      >
-                        <span className="truncate">
-                          {formData.marcas_ids && formData.marcas_ids.length > 0
-                            ? `${formData.marcas_ids.length} marca(s) seleccionada(s)`
-                            : 'Selecciona marcas'}
-                        </span>
-                        <ChevronDown className="h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-3">
-                      <div className="space-y-2">
-                        {MARCAS_ARRAY.map(marca => (
-                          <label key={marca.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
-                            <Checkbox
-                              checked={formData.marcas_ids?.includes(marca.id) || false}
-                              onCheckedChange={(checked) => {
-                                const currentMarcas = formData.marcas_ids || [];
-                                if (checked) {
-                                  setFormData({ 
-                                    ...formData, 
-                                    marcas_ids: [...currentMarcas, marca.id]
-                                  });
-                                } else {
-                                  setFormData({ 
-                                    ...formData, 
-                                    marcas_ids: currentMarcas.filter(id => id !== marca.id)
-                                  });
-                                }
-                              }}
-                            />
-                            <span className="text-sm">{getNombreMarca(marca.id)}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                  <Label htmlFor="submarcaId">Submarca *</Label>
+                  <Select 
+                    value={formData.submarcaId} 
+                    onValueChange={(v) => setFormData({ ...formData, submarcaId: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona submarca" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUBMARCAS_ARRAY.map(submarca => (
+                        <SelectItem key={submarca.id} value={submarca.id}>
+                          {submarca.icono} {submarca.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs text-gray-500 mt-1">
-                    El producto estará disponible en todas las marcas seleccionadas
+                    El producto pertenecerá a esta submarca (Modomio, BlackBurger, etc.)
                   </p>
                 </div>
               </div>
@@ -1569,17 +1292,17 @@ export function GestionProductos() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="categoria">Categoría *</Label>
+                <Label htmlFor="tipoProducto">Tipo de Producto (opcional)</Label>
                 <Select 
-                  value={formData.categoria} 
-                  onValueChange={(v) => setFormData({ ...formData, categoria: v })}
+                  value={formData.tipoProducto || ''} 
+                  onValueChange={(v) => setFormData({ ...formData, tipoProducto: v })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecciona categoría" />
+                    <SelectValue placeholder="Selecciona tipo" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categoriasContext.map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    {TIPOS_PRODUCTO.map(tipo => (
+                      <SelectItem key={tipo} value={tipo}>{tipo}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

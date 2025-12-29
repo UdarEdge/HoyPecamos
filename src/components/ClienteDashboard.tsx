@@ -6,7 +6,7 @@ import { Breadcrumb, type BreadcrumbItem } from './navigation/Breadcrumb';
 import { MobileDrawer, type DrawerMenuItem } from './navigation/MobileDrawer';
 import { BottomNav, type BottomNavItem } from './navigation/BottomNav';
 import { useCart } from '../contexts/CartContext';
-import { Home, Package, ShoppingBag, Store, MapPin, Calendar, Clock, MessageSquare, Settings, Info, LogOut, Menu, Bell, ShoppingCart, CheckCircle2, Ticket } from 'lucide-react';
+import { Home, Package, ShoppingBag, Store, MapPin, Clock, MessageSquare, Settings, Info, LogOut, Menu, Bell, ShoppingCart, CheckCircle2, Ticket } from 'lucide-react';
 import { InicioCliente } from './cliente/InicioCliente';
 import { MisPedidos } from './cliente/MisPedidos';
 import { QuienesSomos } from './cliente/QuienesSomos';
@@ -25,7 +25,6 @@ import udarLogo from 'figma:asset/841a58f721c551c9787f7d758f8005cf7dfb6bc5.png';
 const MiPedido = lazy(() => import('./cliente/MiPedido').then(m => ({ default: m.MiPedido })));
 const CestaOverlay = lazy(() => import('./cliente/CestaOverlay').then(m => ({ default: m.CestaOverlay })));
 const SolicitudCitaModal = lazy(() => import('./cliente/SolicitudCitaModal').then(m => ({ default: m.SolicitudCitaModal })));
-const MisCitas = lazy(() => import('./cliente/MisCitas').then(m => ({ default: m.MisCitas })));
 const AsistenciaModal = lazy(() => import('./cliente/AsistenciaModal').then(m => ({ default: m.AsistenciaModal })));
 const YaEstoyAquiModal = lazy(() => import('./cliente/YaEstoyAquiModal').then(m => ({ default: m.YaEstoyAquiModal })));
 const TurnoDetallesModal = lazy(() => import('./cliente/TurnoDetallesModal').then(m => ({ default: m.TurnoDetallesModal })));
@@ -46,7 +45,6 @@ export function ClienteDashboard({ user, onLogout, onCambiarRol }: ClienteDashbo
   const [cestaOpen, setCestaOpen] = useState(false); // PASO 3: Carrito final
   const [solicitudCitaModalOpen, setSolicitudCitaModalOpen] = useState(false);
   const [asistenciaModalOpen, setAsistenciaModalOpen] = useState(false);
-  const [citasProgramadas, setCitasProgramadas] = useState(2);
   
   // 🛒 Carrito de compra - Contador dinámico
   const { totalItems: itemsEnCesta } = useCart();
@@ -139,7 +137,6 @@ export function ClienteDashboard({ user, onLogout, onCambiarRol }: ClienteDashbo
   const menuItems: MenuItem[] = [
     { id: 'inicio', label: 'Inicio', icon: Home },
     { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag, badge: pedidosActivos > 0 ? pedidosActivos : undefined },
-    { id: 'citas', label: 'Mis Citas', icon: Calendar, badge: citasProgramadas > 0 ? citasProgramadas : undefined },
     { id: 'cupones', label: 'Mis Cupones', icon: Ticket },
     { id: 'quienes-somos', label: '¿Quiénes somos?', icon: Info },
     { id: 'chat', label: 'Chat y Soporte', icon: MessageSquare },
@@ -184,15 +181,6 @@ export function ClienteDashboard({ user, onLogout, onCambiarRol }: ClienteDashbo
         return <InicioCliente onOpenCesta={() => setMiPedidoOpen(true)} onOpenNuevaCita={() => setSolicitudCitaModalOpen(true)} onYaEstoyAqui={handleYaEstoyAqui} />;
       case 'pedidos':
         return <MisPedidos clienteId={user.id} />;
-      case 'citas':
-        return (
-          <Suspense fallback={<LoadingFallback />}>
-            <MisCitas 
-              clienteId={user.id} 
-              onSolicitarCita={() => setSolicitudCitaModalOpen(true)} 
-            />
-          </Suspense>
-        );
       case 'cupones':
         return <MisCupones clienteId={user.id} clienteNombre={user.name} clienteEmail={user.email} />;
       case 'quienes-somos':
@@ -210,10 +198,6 @@ export function ClienteDashboard({ user, onLogout, onCambiarRol }: ClienteDashbo
       default:
         return <InicioCliente onOpenCesta={() => setMiPedidoOpen(true)} onOpenNuevaCita={() => setSolicitudCitaModalOpen(true)} onYaEstoyAqui={handleYaEstoyAqui} />;
     }
-  };
-
-  const handleCitaCreada = () => {
-    setCitasProgramadas(prev => prev + 1);
   };
 
   return (

@@ -1,15 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
 import { projectId, publicAnonKey } from './info';
 
-// Cliente Supabase singleton
+/**
+ * CLIENTE SUPABASE SINGLETON
+ * ===========================
+ * Este singleton evita crear múltiples instancias de GoTrueClient
+ * que pueden causar warnings en la consola del navegador.
+ * 
+ * IMPORTANTE: Siempre usar getSupabaseClient() en lugar de crear
+ * nuevas instancias con createClient().
+ */
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 
 export function getSupabaseClient() {
   if (!supabaseClient) {
     supabaseClient = createClient(
       `https://${projectId}.supabase.co`,
-      publicAnonKey
+      publicAnonKey,
+      {
+        auth: {
+          // Usar el mismo storage key para evitar múltiples instancias
+          storageKey: 'sb-vpvbrnlpseqtzgpozfhp-auth-token',
+          autoRefreshToken: true,
+          persistSession: true,
+        }
+      }
     );
+    console.log('✅ Supabase client singleton inicializado');
   }
   return supabaseClient;
 }

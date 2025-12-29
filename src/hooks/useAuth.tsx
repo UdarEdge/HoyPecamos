@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { authAPI } from '../services/api';
-import { getSupabaseClient } from '../utils/supabase/client';
+import { getSupabaseClient } from '../utils/supabase/client.tsx';
 
 interface User {
   id: string;

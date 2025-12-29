@@ -113,7 +113,8 @@ export function ProductoDetalleNuevo({ producto, onClose, onProductoAñadido }: 
       precio: producto.precio,
       cantidad: cantidad,
       imagen: producto.imagen,
-      categoria: producto.categoria,
+      tipoProducto: producto.tipoProducto || '',
+      submarcaId: producto.submarcaId,
       stock: producto.stock,
       opciones: tieneOpciones ? {
         selecciones: selecciones
@@ -179,7 +180,7 @@ export function ProductoDetalleNuevo({ producto, onClose, onProductoAñadido }: 
           <div className="flex flex-col justify-between">
             <div>
               <Badge variant="outline" className="mb-2">
-                {producto.categoria}
+                {producto.tipoProducto || 'Producto'}
               </Badge>
               <h3 className="text-2xl mb-3 text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
                 {producto.nombre}

@@ -15,6 +15,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner@2.0.3';
 import { pedidosAPI } from '../services/api';
+import { getSupabaseClient } from '../utils/supabase/client.tsx';
 
 // ============================================================================
 // TIPOS
@@ -183,16 +184,44 @@ export function PedidosProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function cargarPedidos() {
       try {
-        // Intentar cargar desde Supabase primero (marca HoyPecamos)
-        const response = await pedidosAPI.getByMarca('MRC-001');
+        // ✅ VERIFICAR SI HAY SESIÓN ACTIVA ANTES DE LLAMAR A SUPABASE
+        const supabase = getSupabaseClient();
+        const { data: { session } } = await supabase.auth.getSession();
         
-        if (response.success && response.pedidos) {
-          console.log('✅ Pedidos cargados desde Supabase:', response.pedidos.length);
-          setPedidos(response.pedidos);
-          setUsandoSupabase(true);
+        if (session?.access_token) {
+          // Usuario autenticado - intentar cargar desde Supabase
+          console.log('🔐 Usuario autenticado, cargando pedidos desde Supabase...');
+          
+          try {
+            const response = await pedidosAPI.getByMarca('MRC-001');
+            
+            if (response.success && response.pedidos) {
+              console.log('✅ Pedidos cargados desde Supabase:', response.pedidos.length);
+              setPedidos(response.pedidos);
+              setUsandoSupabase(true);
+            } else {
+              // Fallback a LocalStorage
+              console.log('⚠️ No hay pedidos en Supabase, cargando desde LocalStorage');
+              const pedidosGuardados = localStorage.getItem('udar-pedidos');
+              if (pedidosGuardados) {
+                const pedidosParseados = JSON.parse(pedidosGuardados);
+                setPedidos(pedidosParseados);
+              }
+              setUsandoSupabase(false);
+            }
+          } catch (supabaseError) {
+            console.error('❌ Error al cargar pedidos desde Supabase:', supabaseError);
+            // Fallback a LocalStorage
+            const pedidosGuardados = localStorage.getItem('udar-pedidos');
+            if (pedidosGuardados) {
+              const pedidosParseados = JSON.parse(pedidosGuardados);
+              setPedidos(pedidosParseados);
+            }
+            setUsandoSupabase(false);
+          }
         } else {
-          // Fallback a LocalStorage
-          console.log('⚠️ No hay pedidos en Supabase, cargando desde LocalStorage');
+          // Usuario NO autenticado - usar solo LocalStorage
+          console.log('⚠️ Usuario no autenticado, cargando pedidos desde LocalStorage');
           const pedidosGuardados = localStorage.getItem('udar-pedidos');
           if (pedidosGuardados) {
             const pedidosParseados = JSON.parse(pedidosGuardados);
@@ -201,7 +230,7 @@ export function PedidosProvider({ children }: { children: React.ReactNode }) {
           setUsandoSupabase(false);
         }
       } catch (error) {
-        console.error('❌ Error al cargar pedidos desde Supabase, usando LocalStorage:', error);
+        console.error('❌ Error general al cargar pedidos:', error);
         try {
           const pedidosGuardados = localStorage.getItem('udar-pedidos');
           if (pedidosGuardados) {

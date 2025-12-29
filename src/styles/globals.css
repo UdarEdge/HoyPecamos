@@ -285,6 +285,16 @@ h1, h2, h3, h4, h5, h6 {
     transform: scale(0.98);
   }
 
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+
   /* Safe area utilities */
   .safe-top {
     padding-top: max(1rem, env(safe-area-inset-top));
@@ -352,6 +362,15 @@ h1, h2, h3, h4, h5, h6 {
     scrollbar-width: none;
   }
   .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Ocultar scrollbar en overflow-x-auto */
+  .overflow-x-auto {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .overflow-x-auto::-webkit-scrollbar {
     display: none;
   }
 
@@ -457,6 +476,22 @@ h1, h2, h3, h4, h5, h6 {
 
   .animate-fade-in {
     animation: fade-in 0.2s ease-out;
+  }
+
+  /* ⭐ Animación de pulso sutil para el botón selector de perfiles */
+  @keyframes pulse-subtle {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.85;
+      transform: scale(1.05);
+    }
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 3s ease-in-out infinite;
   }
 
   /* ========================================

@@ -548,7 +548,7 @@ export function AyudaGerente() {
                     </Button>
                     <Button 
                       onClick={handleEnviarMensaje}
-                      className="bg-teal-600 hover:bg-teal-700"
+                      className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                     >
                       <Send className="w-4 h-4 mr-2" />
                       Enviar
@@ -571,7 +571,7 @@ export function AyudaGerente() {
                 Gestión de chats y consultas de clientes, empleados y externos
               </p>
             </div>
-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={() => setDialogNuevoTicket(true)}>
+            <Button className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all" onClick={() => setDialogNuevoTicket(true)}>
               <Plus className="w-4 h-4 mr-2" />
               Nuevo Chat
             </Button>
@@ -582,7 +582,7 @@ export function AyudaGerente() {
             <Button
               variant={activeFilter === 'todos' ? 'default' : 'outline'}
               onClick={() => setActiveFilter('todos')}
-              className={activeFilter === 'todos' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={activeFilter === 'todos' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md transition-all' : ''}
             >
               <MessageSquare className="w-4 h-4 mr-2" />
               Todos ({contadores.todos})
@@ -590,7 +590,7 @@ export function AyudaGerente() {
             <Button
               variant={activeFilter === 'empleados' ? 'default' : 'outline'}
               onClick={() => setActiveFilter('empleados')}
-              className={activeFilter === 'empleados' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={activeFilter === 'empleados' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md transition-all' : ''}
             >
               <UserCheck className="w-4 h-4 mr-2" />
               Empleados ({contadores.empleados})
@@ -598,7 +598,7 @@ export function AyudaGerente() {
             <Button
               variant={activeFilter === 'externos' ? 'default' : 'outline'}
               onClick={() => setActiveFilter('externos')}
-              className={activeFilter === 'externos' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={activeFilter === 'externos' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md transition-all' : ''}
             >
               <ExternalLink className="w-4 h-4 mr-2" />
               Externos ({contadores.externos})
@@ -838,7 +838,7 @@ export function AyudaGerente() {
             <Button variant="outline" onClick={() => setDialogNuevoTicket(false)}>
               Cancelar
             </Button>
-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={handleCrearTicket}>
+            <Button className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all" onClick={handleCrearTicket}>
               Crear Ticket
             </Button>
           </DialogFooter>

@@ -286,7 +286,7 @@ export function ConfiguracionAgentesExternos() {
         </div>
         <Button
           onClick={() => setModalCrearOpen(true)}
-          className="bg-teal-600 hover:bg-teal-700"
+          className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
         >
           <Plus className="w-4 h-4 mr-2" />
           Añadir agente externo
@@ -662,7 +662,7 @@ function ModalAgente({
           <Button
             onClick={handleGuardar}
             disabled={!nombre || empresasSeleccionadas.length === 0}
-            className="bg-teal-600 hover:bg-teal-700"
+            className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
           >
             {agente ? 'Guardar cambios' : 'Crear agente'}
           </Button>

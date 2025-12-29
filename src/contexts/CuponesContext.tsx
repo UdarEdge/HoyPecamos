@@ -539,8 +539,14 @@ export function CuponesProvider({ children }: CuponesProviderProps) {
     clienteEmail: string
   ): Promise<CodigoClienteGoogleMaps | null> => {
     try {
-      const codigo = `HOYPECAMOS-CLI-${clienteId.substring(0, 8).toUpperCase()}`;
-      const urlParaCompartir = `¡Me encanta HoyPecamos! 🍔❤️ Mi código de recomendación es: ${codigo}`;
+      // 🎯 NUEVO: Generar código corto (8 caracteres) y único
+      // Formato: HP-XXXXX (HP = HoyPecamos, seguido de 6 caracteres alfanuméricos)
+      // Ejemplo: HP-A7K9M2
+      const timestamp = Date.now().toString(36).toUpperCase(); // Convierte timestamp a base36
+      const random = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6 caracteres aleatorios
+      const codigo = `HP-${timestamp.slice(-3)}${random.slice(0, 3)}`; // Código de 8 caracteres (HP-XXXXX)
+      
+      const urlParaCompartir = `¡Me encanta HoyPecamos! 🍔❤️ Mi código es: ${codigo}`;
 
       const nuevoCodigo: CodigoClienteGoogleMaps = {
         id: `GMAPS-${Date.now()}`,
@@ -809,7 +815,7 @@ function generarMockReglas(): ReglaCupon[] {
         apiKey: 'mock-api-key',
         placeId: 'ChIJ...',
         checkIntervalHoras: 6,
-        palabrasClaveRequeridas: ['HOYPECAMOS-CLI'],
+        palabrasClaveRequeridas: ['HP-'],
         ratingMinimo: 4,
         reviewsDetectadas: 8,
       },

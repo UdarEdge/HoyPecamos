@@ -82,7 +82,11 @@ import {
   AlertTriangle,
   Clock,
   Globe,
-  Ticket
+  Ticket,
+  ShoppingCart,
+  Percent,
+  Info,
+  CheckCircle
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { ModalCrearEmpresa } from './ModalCrearEmpresa';
@@ -93,6 +97,11 @@ import { GestionMarcas } from './GestionMarcas';
 import { ModalConfiguracionZonaHoraria } from './ModalConfiguracionZonaHoraria';
 import { CronJobsMonitor } from './CronJobsMonitor';
 import { ConfiguracionCupones } from './ConfiguracionCupones';
+import { ImportacionProductos } from './ImportacionProductos';
+import { IntegracionesDelivery } from './IntegracionesDelivery';
+import { ConfiguracionCanalesVenta } from './ConfiguracionCanalesVenta';
+import { IntegracionesCanales } from './IntegracionesCanales';
+import { SimuladorWebhooks } from './SimuladorWebhooks';
 import { 
   obtenerConfiguracionZonaHoraria,
   actualizarZonaHorariaReferencia,
@@ -194,7 +203,17 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
   const [porcentajeImpuestoSociedades, setPorcentajeImpuestoSociedades] = useState<number>(25); // Nuevo: Configurable
   
   // Estado para subfiltro de Sistema
-  const [subfiltroSistema, setSubfiltroSistema] = useState<'configuracion' | 'chats' | 'quienesSomos' | 'faqs' | 'tpv' | 'importacion' | 'cupones'>('configuracion');
+  const [subfiltroSistema, setSubfiltroSistema] = useState<'configuracion' | 'chats' | 'quienesSomos' | 'faqs' | 'tpv' | 'importacion' | 'cupones' | 'integraciones' | 'canales' | 'integraciones-canales' | 'simulador-webhooks' | 'fiscalidad'>('configuracion');
+  
+  // Estados para Configuración Fiscal
+  const [ivasConfigurados, setIvasConfigurados] = useState([
+    { id: '21', nombre: 'General', porcentaje: 21, recargo: 5.2 },
+    { id: '10', nombre: 'Reducido', porcentaje: 10, recargo: 1.4 },
+    { id: '4', nombre: 'Superreducido', porcentaje: 4, recargo: 0.5 },
+    { id: '0', nombre: 'Exento', porcentaje: 0, recargo: 0 }
+  ]);
+  const [recargoEquivalenciaActivo, setRecargoEquivalenciaActivo] = useState(false);
+  const [modalImportacionProductosOpen, setModalImportacionProductosOpen] = useState(false);
   
   // Estados para Configuración de Zona Horaria
   const [configZonaHoraria, setConfigZonaHoraria] = useState(obtenerConfiguracionZonaHoraria());
@@ -741,47 +760,16 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
         </p>
       </div>
 
-      {/* Banner de Modo Desarrollo - Cambiar Rol */}
-      {onCambiarRol && user && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="p-4 sm:pt-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
-              <div className="flex items-center gap-2 sm:gap-3">
-                <div className="p-1.5 sm:p-2 rounded-lg bg-amber-100 shrink-0">
-                  <UserCog className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
-                </div>
-                <div>
-                  <p className="text-sm sm:text-base text-gray-900 font-medium">
-                    <span className="hidden sm:inline">Modo Desarrollo - Cambio de Perfil</span>
-                    <span className="sm:hidden">Cambio de Perfil</span>
-                  </p>
-                  <p className="text-xs sm:text-sm text-gray-600">
-                    Rol: <span className="font-semibold text-amber-700">
-                      {user.role === 'cliente' ? 'Cliente' : 
-                       user.role === 'trabajador' ? 'Trabajador' : 'Gerente'}
-                    </span>
-                  </p>
-                </div>
-              </div>
-              <Button 
-                onClick={handleCambiarRol}
-                className="bg-amber-600 hover:bg-amber-700 gap-1.5 sm:gap-2 w-full sm:w-auto text-sm h-9 sm:h-10"
-              >
-                <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                Cambiar Perfil
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Banner de Modo Desarrollo - ELIMINADO (ya existe selector de perfiles en header) */}
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-1.5 sm:gap-2">
+      {/* Filtros principales con scroll horizontal */}
+      <div className="overflow-x-auto -mx-2 px-2 scrollbar-hide">
+        <div className="flex gap-1.5 sm:gap-2 min-w-max pb-1">
         <Button
           onClick={() => setFiltroActivo('cuenta')}
           variant={filtroActivo === 'cuenta' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'cuenta' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'cuenta' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           Cuenta
@@ -790,25 +778,16 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('puntosVenta')}
           variant={filtroActivo === 'puntosVenta' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'puntosVenta' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'puntosVenta' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           Empresas
         </Button>
         <Button
-          onClick={() => setFiltroActivo('marcas')}
-          variant={filtroActivo === 'marcas' ? 'default' : 'outline'}
-          size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'marcas' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Image className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-          Marcas
-        </Button>
-        <Button
           onClick={() => setFiltroActivo('presupuesto')}
           variant={filtroActivo === 'presupuesto' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'presupuesto' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'presupuesto' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Calculator className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           <span className="hidden sm:inline">Presupuesto</span>
@@ -818,7 +797,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('agentes')}
           variant={filtroActivo === 'agentes' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'agentes' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'agentes' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           <span className="hidden sm:inline">Agentes Externos</span>
@@ -828,7 +807,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('privacidad')}
           variant={filtroActivo === 'privacidad' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'privacidad' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'privacidad' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           <span className="hidden sm:inline">Privacidad</span>
@@ -838,7 +817,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('seguridad')}
           variant={filtroActivo === 'seguridad' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'seguridad' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'seguridad' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           <span className="hidden sm:inline">Seguridad</span>
@@ -848,7 +827,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('notificaciones')}
           variant={filtroActivo === 'notificaciones' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'notificaciones' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'notificaciones' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           <span className="hidden sm:inline">Notificaciones</span>
@@ -858,11 +837,12 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
           onClick={() => setFiltroActivo('sistema')}
           variant={filtroActivo === 'sistema' ? 'default' : 'outline'}
           size="sm"
-          className={`text-xs sm:text-sm h-8 sm:h-9 ${filtroActivo === 'sistema' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
+          className={`text-xs sm:text-sm h-8 sm:h-9 font-medium rounded-lg transition-all ${filtroActivo === 'sistema' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
         >
           <Cog className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           Sistema
         </Button>
+        </div>
       </div>
 
       {/* Contenido según filtro activo */}
@@ -1041,7 +1021,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
 
               <div className="flex gap-2">
                 <Button variant="outline">Cancelar</Button>
-                <Button onClick={handleGuardar} className="bg-teal-600 hover:bg-teal-700">
+                <Button onClick={handleGuardar} className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                   Guardar Cambios
                 </Button>
               </div>
@@ -1067,7 +1047,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
                   setAgenteExternoSeleccionado(null);
                   setModalAgenteExternoOpen(true);
                 }}
-                className="bg-teal-600 hover:bg-teal-700"
+                className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                 size="sm"
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -1216,10 +1196,6 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
         <ConfiguracionEmpresas />
       )}
 
-      {filtroActivo === 'marcas' && (
-        <GestionMarcas />
-      )}
-
       {filtroActivo === 'presupuesto' && (
         <Card>
           <CardHeader>
@@ -1363,7 +1339,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
                 {/* Botón Guardar */}
                 <Button 
                   size="sm" 
-                  className="bg-teal-600 hover:bg-teal-700 flex-shrink-0"
+                  className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 font-medium rounded-lg shadow-md hover:shadow-lg transition-all flex-shrink-0"
                   onClick={() => {
                     toast.success('Presupuesto guardado correctamente');
                   }}
@@ -2465,12 +2441,13 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
 
       {filtroActivo === 'sistema' && (
         <div className="space-y-6">
-          {/* Subfiltros de Sistema */}
-          <div className="flex gap-2">
+          {/* Subfiltros de Sistema con scroll horizontal */}
+          <div className="overflow-x-auto -mx-2 px-2 scrollbar-hide">
+            <div className="flex gap-2 min-w-max pb-1">
             <Button
               onClick={() => setSubfiltroSistema('configuracion')}
               variant={subfiltroSistema === 'configuracion' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'configuracion' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'configuracion' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <Cog className="w-4 h-4 mr-2" />
               Configuración del Sistema
@@ -2478,7 +2455,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('chats')}
               variant={subfiltroSistema === 'chats' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'chats' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'chats' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <MessageSquare className="w-4 h-4 mr-2" />
               Chats
@@ -2486,7 +2463,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('quienesSomos')}
               variant={subfiltroSistema === 'quienesSomos' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'quienesSomos' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'quienesSomos' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <Building2 className="w-4 h-4 mr-2" />
               Quienes Somos
@@ -2494,7 +2471,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('faqs')}
               variant={subfiltroSistema === 'faqs' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'faqs' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'faqs' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <FileText className="w-4 h-4 mr-2" />
               FAQs
@@ -2502,7 +2479,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('tpv')}
               variant={subfiltroSistema === 'tpv' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'tpv' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'tpv' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <Monitor className="w-4 h-4 mr-2" />
               TPV
@@ -2510,7 +2487,7 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('importacion')}
               variant={subfiltroSistema === 'importacion' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'importacion' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'importacion' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <Upload className="w-4 h-4 mr-2" />
               Importación
@@ -2518,11 +2495,52 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
             <Button
               onClick={() => setSubfiltroSistema('cupones')}
               variant={subfiltroSistema === 'cupones' ? 'default' : 'outline'}
-              className={subfiltroSistema === 'cupones' ? 'bg-teal-600 hover:bg-teal-700' : ''}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'cupones' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
             >
               <Ticket className="w-4 h-4 mr-2" />
               Cupones y Reglas
             </Button>
+            <Button
+              onClick={() => setSubfiltroSistema('canales')}
+              variant={subfiltroSistema === 'canales' ? 'default' : 'outline'}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'canales' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+            >
+              <ShoppingCart className="w-4 h-4 mr-2" />
+              Canales de Venta
+            </Button>
+            <Button
+              onClick={() => setSubfiltroSistema('integraciones-canales')}
+              variant={subfiltroSistema === 'integraciones-canales' ? 'default' : 'outline'}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'integraciones-canales' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              Integraciones
+            </Button>
+            <Button
+              onClick={() => setSubfiltroSistema('simulador-webhooks')}
+              variant={subfiltroSistema === 'simulador-webhooks' ? 'default' : 'outline'}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'simulador-webhooks' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              🧪 Simulador Webhooks
+            </Button>
+            <Button
+              onClick={() => setSubfiltroSistema('integraciones')}
+              variant={subfiltroSistema === 'integraciones' ? 'default' : 'outline'}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'integraciones' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+            >
+              <TruckIcon className="w-4 h-4 mr-2" />
+              Delivery (legacy)
+            </Button>
+            <Button
+              onClick={() => setSubfiltroSistema('fiscalidad')}
+              variant={subfiltroSistema === 'fiscalidad' ? 'default' : 'outline'}
+              className={`font-medium rounded-lg transition-all ${subfiltroSistema === 'fiscalidad' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+            >
+              <Percent className="w-4 h-4 mr-2" />
+              Fiscalidad
+            </Button>
+            </div>
           </div>
 
           {/* Contenido Configuración del Sistema */}
@@ -3670,36 +3688,16 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
                             </div>
                           </div>
                         </div>
-                        <div className="space-y-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="w-full justify-start"
-                            onClick={() => toast.info('Descargando plantilla de productos...')}
-                          >
-                            <Download className="w-4 h-4 mr-2" />
-                            Descargar Plantilla
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            className="w-full bg-teal-600 hover:bg-teal-700"
-                            onClick={() => {
-                              const input = document.createElement('input');
-                              input.type = 'file';
-                              input.accept = '.csv,.xlsx,.xls';
-                              input.onchange = (e: any) => {
-                                const file = e.target.files[0];
-                                if (file) toast.success(`Importando ${file.name}...`);
-                              };
-                              input.click();
-                            }}
-                          >
-                            <Upload className="w-4 h-4 mr-2" />
-                            Importar Productos
-                          </Button>
-                        </div>
+                        <Button 
+                          size="sm" 
+                          className="w-full bg-teal-600 hover:bg-teal-700"
+                          onClick={() => setModalImportacionProductosOpen(true)}
+                        >
+                          <Upload className="w-4 h-4 mr-2" />
+                          Abrir Importador de Productos
+                        </Button>
                         <p className="text-xs text-gray-500 mt-2">
-                          Campos: SKU, Nombre, Descripción, Precio, IVA, Categoría, Stock, PDV
+                          Importa desde JSON, CSV o añade productos manualmente
                         </p>
                       </CardContent>
                     </Card>
@@ -4147,6 +4145,196 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
 
           {/* Contenido Cupones y Reglas */}
           {subfiltroSistema === 'cupones' && <ConfiguracionCupones />}
+
+          {/* Contenido Canales de Venta */}
+          {subfiltroSistema === 'canales' && <ConfiguracionCanalesVenta />}
+
+          {/* Contenido Integraciones Unificadas */}
+          {subfiltroSistema === 'integraciones-canales' && <IntegracionesCanales />}
+
+          {/* Contenido Integraciones Delivery (legacy) */}
+          {subfiltroSistema === 'integraciones' && <IntegracionesDelivery />}
+
+          {/* Contenido Simulador de Webhooks */}
+          {subfiltroSistema === 'simulador-webhooks' && <SimuladorWebhooks />}
+
+          {/* Contenido Fiscalidad */}
+          {subfiltroSistema === 'fiscalidad' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Percent className="w-5 h-5 text-teal-600" />
+                  Configuración Fiscal
+                </CardTitle>
+                <p className="text-sm text-gray-600 mt-2">
+                  Gestiona los tipos de IVA y recargos de equivalencia aplicables en tu negocio. 
+                  <strong className="text-amber-600"> Los cambios solo afectarán a nuevos productos vendidos</strong>, no modificarán precios de productos antiguos ni facturas ya emitidas.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Recargo de Equivalencia */}
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 mb-1">Recargo de Equivalencia</h4>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Activa esta opción si tu empresa está sujeta al régimen de recargo de equivalencia 
+                        (tiendas minoristas, comercios, etc.)
+                      </p>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="rounded"
+                          checked={recargoEquivalenciaActivo}
+                          onChange={(e) => {
+                            setRecargoEquivalenciaActivo(e.target.checked);
+                            toast.success(e.target.checked ? '✅ Recargo de equivalencia activado' : 'Recargo de equivalencia desactivado');
+                          }}
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          Aplicar recargo de equivalencia
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de IVAs configurados */}
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-3">Tipos de IVA Configurados</h4>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Tipo</th>
+                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">IVA (%)</th>
+                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Recargo Equiv. (%)</th>
+                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Total Aplicable</th>
+                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ivasConfigurados.map((iva) => (
+                          <tr key={iva.id} className="border-t hover:bg-gray-50">
+                            <td className="py-3 px-4">
+                              <Input
+                                className="w-full text-sm"
+                                value={iva.nombre}
+                                onChange={(e) => {
+                                  setIvasConfigurados(prev => prev.map(i => 
+                                    i.id === iva.id ? { ...i, nombre: e.target.value } : i
+                                  ));
+                                }}
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <Input
+                                type="number"
+                                step="0.1"
+                                className="w-20 text-center mx-auto"
+                                value={iva.porcentaje}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setIvasConfigurados(prev => prev.map(i => 
+                                    i.id === iva.id ? { ...i, porcentaje: val } : i
+                                  ));
+                                }}
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <Input
+                                type="number"
+                                step="0.1"
+                                className="w-20 text-center mx-auto"
+                                value={iva.recargo}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setIvasConfigurados(prev => prev.map(i => 
+                                    i.id === iva.id ? { ...i, recargo: val } : i
+                                  ));
+                                }}
+                              />
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="font-semibold text-gray-900">
+                                {recargoEquivalenciaActivo 
+                                  ? (iva.porcentaje + iva.recargo).toFixed(1) 
+                                  : iva.porcentaje}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (ivasConfigurados.length > 1) {
+                                    setIvasConfigurados(prev => prev.filter(i => i.id !== iva.id));
+                                    toast.success('Tipo de IVA eliminado');
+                                  } else {
+                                    toast.error('Debe haber al menos un tipo de IVA');
+                                  }
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full mt-3"
+                    onClick={() => {
+                      setIvasConfigurados(prev => [...prev, {
+                        id: `iva-${Date.now()}`,
+                        nombre: 'Personalizado',
+                        porcentaje: 21,
+                        recargo: 5.2
+                      }]);
+                      toast.success('Nuevo tipo de IVA añadido');
+                    }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Añadir Tipo de IVA
+                  </Button>
+                </div>
+
+                {/* Información adicional */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-blue-800 font-medium mb-1">
+                        Tipos de IVA en España (2024)
+                      </p>
+                      <ul className="text-xs text-blue-700 space-y-1">
+                        <li>• <strong>General (21%):</strong> Mayoría de productos y servicios</li>
+                        <li>• <strong>Reducido (10%):</strong> Alimentos, transporte, hostelería</li>
+                        <li>• <strong>Superreducido (4%):</strong> Productos básicos (pan, leche, frutas, verduras, medicamentos)</li>
+                        <li>• <strong>Exento (0%):</strong> Productos específicos sin IVA</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Guardar cambios */}
+                <div className="flex justify-end pt-4 border-t">
+                  <Button
+                    className="bg-teal-600 hover:bg-teal-700"
+                    onClick={() => {
+                      toast.success('✅ Configuración fiscal guardada correctamente');
+                    }}
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Guardar Configuración
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -5669,6 +5857,22 @@ export function ConfiguracionGerente({ activeSubsection = 'cuenta', user, onCamb
               Guardar Configuración
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Importación de Productos */}
+      <Dialog open={modalImportacionProductosOpen} onOpenChange={setModalImportacionProductosOpen}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-teal-600" />
+              Importación de Productos
+            </DialogTitle>
+            <DialogDescription>
+              Importa productos masivamente desde JSON, CSV o añádelos manualmente
+            </DialogDescription>
+          </DialogHeader>
+          <ImportacionProductos />
         </DialogContent>
       </Dialog>
     </div>

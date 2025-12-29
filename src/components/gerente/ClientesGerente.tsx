@@ -5,10 +5,9 @@
  * ==========================================
  * 
  * FILTROS GLOBALES (se pasan a todas las consultas):
- * - filtroMarca: 'todas' | 'pizzas' | 'burguers'
- * - filtroPDV: 'todos' | 'tiana' | 'badalona'
+ * - selectedContext: array de { empresa_id, marca_id, punto_venta_id } seleccionados
  * - filtroPeriodo: '7' | '30' | '90' | 'mes' | 'ano' (días)
- * - filtroCanal: 'todos' | 'tpv' | 'online'
+ * - filtroCanal: string (slug del canal: 'todos', 'tpv', 'online', 'whatsapp', 'marketplace', etc.) - DINÁMICO desde configuración
  * 
  * ENTIDADES/TABLAS:
  * 
@@ -129,7 +128,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { 
   EMPRESAS, 
-  MARCAS, 
+  MARCAS,
+  SUBMARCAS,
   PUNTOS_VENTA,
   getNombreEmpresa,
   getNombrePDVConMarcas,
@@ -139,6 +139,7 @@ import {
   MARCAS_ARRAY,
   PUNTOS_VENTA_ARRAY
 } from '../../constants/empresaConfig';
+import { FiltroContextoJerarquico, SelectedContext } from './FiltroContextoJerarquico';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -197,6 +198,7 @@ import {
   Sparkles,
   AlertTriangle,
   LayoutGrid,
+  Receipt,
   List,
   UserPlus,
   Download,
@@ -237,7 +239,13 @@ import {
   ArrowUpDown,
   Info,
   Upload,
-  Trash2
+  Trash2,
+  Copy,
+  AlertCircle,
+  Building,
+  Sparkles,
+  Clock,
+  RefreshCw
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { EmptyState } from '../ui/empty-state';
@@ -245,12 +253,17 @@ import { StatsCard } from '../ui/stats-card';
 import { SkeletonCard } from '../ui/skeleton-card';
 import { SkeletonList } from '../ui/skeleton-list';
 import { toast } from 'sonner';
+import { useCanalesVenta } from '../../utils/canales-venta';
 import { stockIngredientes } from '../../data/stock-ingredientes';
 import { promocionesDisponibles } from '../../data/promociones-disponibles';
+import { AnalyticsProducto } from './AnalyticsProducto';
+import { registrarEvento } from '../../utils/analytics';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { productosPanaderia, type ProductoPanaderia } from '../../data/productos-panaderia';
 import { articulosStock, type ArticuloStock } from '../../data/articulos-stock';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import { getSupabaseClient } from '../../utils/supabase/client.tsx';
 
 interface Cliente {
   id: string;
@@ -312,7 +325,10 @@ interface Valoracion {
 }
 
 export function ClientesGerente() {
-  const [activeTab, setActiveTab] = useState('clientes');
+  // Hook para canales de venta dinámicos
+  const { canalesActivos } = useCanalesVenta();
+  
+  const [activeTab, setActiveTab] = useState('productos');
   const [busqueda, setBusqueda] = useState('');
   const [modalAñadirPromocion, setModalAñadirPromocion] = useState(false);
   const [modalEditarPromocion, setModalEditarPromocion] = useState(false);
@@ -326,6 +342,14 @@ export function ClientesGerente() {
   const [tabNuevoCliente, setTabNuevoCliente] = useState('info');
   const [vistaPromociones, setVistaPromociones] = useState<'fichas' | 'lista'>('fichas');
   const [tabDetallesCliente, setTabDetallesCliente] = useState('resumen');
+  
+  // Estados para datos del backend - Cliente
+  const [historialPedidos, setHistorialPedidos] = useState<any[]>([]);
+  const [promocionesCliente, setPromocionesCliente] = useState<any[]>([]);
+  const [favoritosCliente, setFavoritosCliente] = useState<any[]>([]);
+  const [cargandoHistorialCliente, setCargandoHistorialCliente] = useState(false);
+  const [cargandoPromocionesCliente, setCargandoPromocionesCliente] = useState(false);
+  const [cargandoFavoritosCliente, setCargandoFavoritosCliente] = useState(false);
   
   // Estados para formulario de Nuevo Cliente
   const [nuevoClienteNombre, setNuevoClienteNombre] = useState('');
@@ -359,13 +383,26 @@ export function ClientesGerente() {
     segmentacion: true
   });
   
+  // Estados para filtros de productos
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+  const [vistaProductos, setVistaProductos] = useState<'tarjetas' | 'tabla'>('tarjetas'); // Vista predefinida: tarjetas
+  
+  // Estados para importación de productos
+  const [modalImportarProductos, setModalImportarProductos] = useState(false);
+  const [archivoImportacion, setArchivoImportacion] = useState<File | null>(null);
+  const [datosPreview, setDatosPreview] = useState<any[]>([]);
+  const [errorImportacion, setErrorImportacion] = useState<string>('');
+  const [pasoImportacion, setPasoImportacion] = useState<'subir' | 'preview' | 'confirmacion'>('subir');
+  const [productosImportados, setProductosImportados] = useState(0);
+  const [importando, setImportando] = useState(false);
+  
   // Filtros superiores comunes - Se pasan a todas las consultas de datos
-  const [filtroFamilia, setFiltroFamilia] = useState<string>('todas');
-  const [filtroMarca, setFiltroMarca] = useState<string>('todas');
-  const [filtroPDV, setFiltroPDV] = useState<string[]>([]);
+  const [selectedContext, setSelectedContext] = useState<SelectedContext[]>([]);
   const [filtroPeriodo, setFiltroPeriodo] = useState<'7' | '30' | '90' | 'mes' | 'ano'>('30');
-  const [filtroCanal, setFiltroCanal] = useState<'todos' | 'tpv' | 'online'>('todos');
+  const [filtroCanal, setFiltroCanal] = useState<string>('todos'); // Acepta cualquier slug de canal dinámico
   const [modalNuevoProducto, setModalNuevoProducto] = useState(false);
+  const [modoEdicionProducto, setModoEdicionProducto] = useState(false); // Para distinguir crear vs editar
+  const [productoEditando, setProductoEditando] = useState<any>(null); // Datos del producto que se está editando
   const [tabNuevoProducto, setTabNuevoProducto] = useState('general');
   const [tipoProducto, setTipoProducto] = useState<'simple' | 'manufacturado' | 'combo'>('simple');
   const [pasoActual, setPasoActual] = useState(1); // Wizard de 1 a 5 (añadido paso 5 para resumen)
@@ -410,10 +447,125 @@ export function ClientesGerente() {
   const [busquedaArticulo, setBusquedaArticulo] = useState('');
   const [busquedaCombo, setBusquedaCombo] = useState('');
   const [nombreProducto, setNombreProducto] = useState('');
+  const [empresaProducto, setEmpresaProducto] = useState(''); // NUEVO: Empresa a la que pertenece el producto
+  const [categoriaProducto, setCategoriaProducto] = useState('');
+  const [subcategoriaProducto, setSubcategoriaProducto] = useState('');
+  const [descripcionCorta, setDescripcionCorta] = useState('');
+  const [descripcionLarga, setDescripcionLarga] = useState('');
+  const [alergenosSeleccionados, setAlergenosSeleccionados] = useState<{nombre: string; color: string}[]>([]);
+  const [etiquetasSeleccionadas, setEtiquetasSeleccionadas] = useState<{nombre: string; color: string}[]>([]);
+  const [nuevoAlergeno, setNuevoAlergeno] = useState('');
+  const [colorAlergeno, setColorAlergeno] = useState('#f59e0b');
+  const [nuevaEtiqueta, setNuevaEtiqueta] = useState('');
+  const [colorEtiqueta, setColorEtiqueta] = useState('#8b5cf6');
   const [imagenProducto, setImagenProducto] = useState('');
   const [stockMinimo, setStockMinimo] = useState(5);
   const [stockActual, setStockActual] = useState(20);
   const [stockMaximo, setStockMaximo] = useState(50);
+  
+  // Nuevos estados para mejoras del wizard
+  const [categoriaPersonalizada, setCategoriaPersonalizada] = useState('');
+  const [modalNuevaCategoria, setModalNuevaCategoria] = useState(false);
+  const [categoriasPersonalizadas, setCategoriasPersonalizadas] = useState<string[]>([]);
+  const [disponibleOnline, setDisponibleOnline] = useState(true);
+  const [margenDeseado, setMargenDeseado] = useState(60);
+  const [precioCosteManual, setPrecioCosteManual] = useState<number | null>(null);
+  const [stockInicial, setStockInicial] = useState(0);
+  const [pdvsSeleccionados, setPdvsSeleccionados] = useState<string[]>(['todos']);
+  const [skuProducto, setSkuProducto] = useState('');
+  
+  // Estados para gestión completa de categorías
+  const [modalGestionCategorias, setModalGestionCategorias] = useState(false);
+  const [categoriaEmoticon, setCategoriaEmoticon] = useState('🍽️');
+  const [categoriaNombre, setCategoriaNombre] = useState('');
+  const [categoriaEditando, setCategoriaEditando] = useState<{id: string; emoticono: string; nombre: string; tipo: 'serie' | 'personalizada'} | null>(null);
+  const [categoriasGestion, setCategoriasGestion] = useState<{id: string; emoticono: string; nombre: string}[]>([]);
+  const [categoriasSerie, setCategoriasSerie] = useState<{id: string; emoticono: string; nombre: string; value: string}[]>([
+    { id: 'cat-serie-bebidas', emoticono: '☕', nombre: 'Bebidas', value: 'bebidas' },
+    { id: 'cat-serie-panaderia', emoticono: '🥖', nombre: 'Panadería', value: 'panaderia' },
+    { id: 'cat-serie-reposteria', emoticono: '🍰', nombre: 'Repostería', value: 'reposteria' },
+    { id: 'cat-serie-salado', emoticono: '🥪', nombre: 'Salado', value: 'salado' },
+    { id: 'cat-serie-dulces', emoticono: '🍪', nombre: 'Dulces', value: 'dulces' },
+  ]);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // 📦 STOCK FÍSICO POR PDV (sin marca, compartido entre todas)
+  // ═══════════════════════════════════════════════════════════════
+  const [stockPorPDV, setStockPorPDV] = useState<{
+    empresaId: string; 
+    empresaNombre: string; 
+    pdvId: string; 
+    pdvNombre: string; 
+    stockActual: number;
+    stockMinimo: number;
+    stockMaximo?: number;
+  }[]>([]);
+  const [modalStockPorPDV, setModalStockPorPDV] = useState(false);
+  const [contextosStockTemp, setContextosStockTemp] = useState<SelectedContext[]>([]);
+  const [stockActualTemp, setStockActualTemp] = useState(0);
+  const [stockMinimoTemp, setStockMinimoTemp] = useState(0);
+  const [stockMaximoTemp, setStockMaximoTemp] = useState<number | null>(null);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // 💰 PRECIOS Y DISPONIBILIDAD POR MARCA + CANAL + PDV
+  // ═══════════════════════════════════════════════════════════════
+  const [preciosPorContexto, setPreciosPorContexto] = useState<{
+    empresaId: string;
+    empresaNombre: string;
+    marcaId: string;
+    marcaNombre: string;
+    submarcaId?: string; // ⭐ NUEVO: ID de submarca si existe
+    pdvId?: string;
+    pdvNombre?: string;
+    canal: string; // app | web | tpv | glovo | uber_eats | just_eat | whatsapp
+    canalNombre: string;
+    precioVenta: number;
+    disponible: boolean;
+  }[]>([]);
+  const [modalPreciosPorContexto, setModalPreciosPorContexto] = useState(false);
+  const [contextosPrecioTemp, setContextosPrecioTemp] = useState<SelectedContext[]>([]);
+  const [canalPrecioTemp, setCanalPrecioTemp] = useState('');
+  const [precioVentaTemp, setPrecioVentaTemp] = useState<number | null>(null);
+  const [disponibleTemp, setDisponibleTemp] = useState(true);
+  
+  // IVAs y recargo - Se leen desde Configuración Sistema (no se modifican aquí)
+  const ivasConfigurados = [
+    { id: '21', nombre: 'General', porcentaje: 21, recargo: 5.2 },
+    { id: '10', nombre: 'Reducido', porcentaje: 10, recargo: 1.4 },
+    { id: '4', nombre: 'Superreducido', porcentaje: 4, recargo: 0.5 },
+    { id: '0', nombre: 'Exento', porcentaje: 0, recargo: 0 }
+  ];
+  const recargoEquivalenciaActivo = false; // TODO: Leer desde Configuración Sistema
+  
+  // ⭐ DATOS LOCALES: Usar empresaConfig.ts como fuente de verdad
+  // Ya no necesitamos cargar desde Supabase, usamos la configuración centralizada
+  const empresasDisponiblesLocal = Object.values(EMPRESAS);
+  const marcasDisponiblesLocal = Object.values(MARCAS);
+  const pdvsDisponiblesLocal = Object.values(PUNTOS_VENTA);
+  
+  // Estados legacy para compatibilidad (mantenidos pero ya no se usan para cargar de Supabase)
+  const [empresasDisponibles, setEmpresasDisponibles] = useState<{id: string; nombre: string}[]>([]);
+  const [pdvsDisponibles, setPdvsDisponibles] = useState<{id: string; nombre: string; empresaId: string}[]>([]);
+  const [cargandoEmpresas, setCargandoEmpresas] = useState(false);
+  const [cargandoPDVs, setCargandoPDVs] = useState(false);
+  const [historialProducto, setHistorialProducto] = useState<any[]>([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  
+  // Precios por submarca y canal - SISTEMA DINÁMICO EDITABLE
+  const [preciosPorSubmarcaCanal, setPreciosPorSubmarcaCanal] = useState<{
+    id: string;
+    submarca: string;
+    canal: string;
+    pvp: number;
+    margen: number;
+  }[]>([]);
+  
+  // Submarcas y canales disponibles (deben venir del backend en producción)
+  // TODO: Leer desde Configuración → Empresa → Marcas
+  const submarcasDisponibles = ['Modomio', 'BlackBurger']; // Sin "Otro"
+  
+  // Canales de venta predefinidos del sistema
+  const canalesDisponibles = ['App/Web', 'PDV']; // Canales base del sistema
   
   // Estados para Modal Crear Promoción
   const [pasoPromocion, setPasoPromocion] = useState(1); // 1-4 steps
@@ -445,6 +597,282 @@ export function ClientesGerente() {
     stock: false,
     visibilidad: false
   });
+  
+  // Pre-rellenar campos al editar un producto
+  useEffect(() => {
+    if (modoEdicionProducto && productoEditando) {
+      setTipoProducto(productoEditando.tipoProducto || 'simple');
+      setNombreProducto(productoEditando.nombre || '');
+      setCategoriaProducto(productoEditando.categoria || '');
+      setDescripcionCorta(productoEditando.descripcionCorta || '');
+      setDescripcionLarga(productoEditando.descripcionLarga || '');
+      setSkuProducto(productoEditando.sku || '');
+      setPrecioCoste(productoEditando.coste || 0);
+      if (productoEditando.coste) {
+        setPrecioCosteManual(productoEditando.coste);
+      }
+      if (productoEditando.pvp) {
+        setPvpManual(productoEditando.pvp);
+      }
+      setIvaSeleccionado(productoEditando.iva?.toString() || '21');
+      setStockInicial(productoEditando.stock || 0);
+      setDisponibleOnline(productoEditando.visibilidadApp ?? true);
+      setVisibilidadTPV(productoEditando.visibilidadTPV ?? true);
+      setVisibilidadApp(productoEditando.visibilidadApp ?? true);
+      
+      // Pre-rellenar PDVs si está disponible
+      if (productoEditando.pdvs && productoEditando.pdvs.length > 0) {
+        setPdvsSeleccionados(productoEditando.pdvs);
+      }
+    }
+  }, [modoEdicionProducto, productoEditando]);
+
+  // Cálculos automáticos de precios
+  useEffect(() => {
+    // Calcular coste automático si es manufacturado
+    if (tipoProducto === 'manufacturado' && ingredientesSeleccionados.length > 0) {
+      const costeIngredientes = ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0);
+      const merma = costeIngredientes * 0.10; // 10% de merma
+      setPrecioCosteAuto(costeIngredientes + merma);
+    } else if (tipoProducto === 'combo' && productosComboSeleccionados.length > 0) {
+      const costeCombo = productosComboSeleccionados.reduce((sum, prod) => sum + prod.precioCoste, 0);
+      setPrecioCosteAuto(costeCombo);
+    }
+  }, [tipoProducto, ingredientesSeleccionados, productosComboSeleccionados]);
+  
+  useEffect(() => {
+    // Calcular PVP automáticamente basado en coste y margen
+    const costeActual = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+    if (costeActual > 0 && margenDeseado > 0) {
+      const pvpCalc = costeActual * (1 + margenDeseado / 100);
+      setPvpCalculado(Math.round(pvpCalc * 100) / 100);
+    }
+  }, [precioCoste, precioCosteAuto, precioCosteManual, margenDeseado]);
+  
+  // 🔌 CARGAR EMPRESAS Y PDVs DESDE SUPABASE
+  useEffect(() => {
+    cargarEmpresas();
+  }, []);
+  
+  useEffect(() => {
+    if (empresaProducto) {
+      cargarPDVs(empresaProducto);
+    }
+  }, [empresaProducto]);
+  
+  useEffect(() => {
+    // Cargar historial cuando se abre el modal de ver producto y está en la pestaña historial
+    if (modalVerProducto && tabDetallesProducto === 'historial' && historialProducto.length === 0) {
+      cargarHistorialProducto('PRD-001'); // TODO: Usar el ID del producto seleccionado
+    }
+  }, [modalVerProducto, tabDetallesProducto]);
+  
+  // useEffect para cargar datos del cliente según el tab activo
+  useEffect(() => {
+    if (modalVerDetalles && clienteSeleccionado) {
+      console.log('🔄 Modal abierto, tab actual:', tabDetallesCliente);
+      
+      // Cargar historial cuando se abre el tab historial
+      if (tabDetallesCliente === 'historial' && historialPedidos.length === 0) {
+        console.log('📦 Cargando historial del cliente:', clienteSeleccionado.id);
+        cargarHistorialCliente(clienteSeleccionado.id);
+      }
+      
+      // Cargar promociones cuando se abre el tab promociones
+      if (tabDetallesCliente === 'promociones' && promocionesCliente.length === 0) {
+        console.log('🎁 Cargando promociones del cliente:', clienteSeleccionado.id);
+        cargarPromocionesCliente(clienteSeleccionado.id);
+      }
+      
+      // Cargar favoritos cuando se abre el tab favoritos
+      if (tabDetallesCliente === 'favoritos' && favoritosCliente.length === 0) {
+        console.log('❤️ Cargando favoritos del cliente:', clienteSeleccionado.id);
+        cargarFavoritosCliente(clienteSeleccionado.id);
+      }
+    }
+  }, [modalVerDetalles, tabDetallesCliente, clienteSeleccionado]);
+  
+  const cargarEmpresas = async () => {
+    setCargandoEmpresas(true);
+    try {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/empresas`, {
+        headers: {
+          'Authorization': `Bearer ${publicAnonKey}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.empresas) {
+          setEmpresasDisponibles(data.empresas.map((emp: any) => ({
+            id: emp.id,
+            nombre: emp.nombre
+          })));
+        }
+      }
+    } catch (error) {
+      console.error('Error al cargar empresas:', error);
+      toast.error('Error al cargar empresas');
+    } finally {
+      setCargandoEmpresas(false);
+    }
+  };
+  
+  const cargarPDVs = async (empresaId: string) => {
+    setCargandoPDVs(true);
+    try {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/pdvs/empresa/${empresaId}`, {
+        headers: {
+          'Authorization': `Bearer ${publicAnonKey}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.pdvs) {
+          setPdvsDisponibles(data.pdvs.map((pdv: any) => ({
+            id: pdv.id,
+            nombre: pdv.nombre,
+            empresaId: pdv.empresaId
+          })));
+        } else {
+          setPdvsDisponibles([]);
+        }
+      }
+    } catch (error) {
+      console.error('Error al cargar PDVs:', error);
+      toast.error('Error al cargar PDVs');
+      setPdvsDisponibles([]);
+    } finally {
+      setCargandoPDVs(false);
+    }
+  };
+  
+  const cargarHistorialProducto = async (productoId: string) => {
+    setCargandoHistorial(true);
+    try {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/productos/${productoId}/historial`, {
+        headers: {
+          'Authorization': `Bearer ${publicAnonKey}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.historial) {
+          setHistorialProducto(data.historial);
+        }
+      }
+    } catch (error) {
+      console.error('Error al cargar historial:', error);
+    } finally {
+      setCargandoHistorial(false);
+    }
+  };
+  
+  // Funciones para cargar datos del cliente desde el backend
+  const cargarHistorialCliente = async (clienteId: string) => {
+    setCargandoHistorialCliente(true);
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/clientes/${clienteId}/historial`,
+        {
+          headers: {
+            'Authorization': `Bearer ${publicAnonKey}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.pedidos) {
+          setHistorialPedidos(data.pedidos);
+          console.log('✅ Historial cargado:', data.pedidos.length, 'pedidos');
+        } else {
+          setHistorialPedidos([]);
+          console.log('⚠️ No hay pedidos en el historial');
+        }
+      } else {
+        console.error('❌ Error al cargar historial del cliente:', response.status);
+        setHistorialPedidos([]);
+      }
+    } catch (error) {
+      console.error('❌ Error al cargar historial del cliente:', error);
+      setHistorialPedidos([]);
+      toast.error('Error al cargar el historial de pedidos');
+    } finally {
+      setCargandoHistorialCliente(false);
+    }
+  };
+  
+  const cargarPromocionesCliente = async (clienteId: string) => {
+    setCargandoPromocionesCliente(true);
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/clientes/${clienteId}/promociones`,
+        {
+          headers: {
+            'Authorization': `Bearer ${publicAnonKey}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.promociones) {
+          setPromocionesCliente(data.promociones);
+          console.log('✅ Promociones cargadas:', data.promociones.length);
+        } else {
+          setPromocionesCliente([]);
+          console.log('⚠️ No hay promociones para este cliente');
+        }
+      } else {
+        console.error('❌ Error al cargar promociones del cliente:', response.status);
+        setPromocionesCliente([]);
+      }
+    } catch (error) {
+      console.error('❌ Error al cargar promociones del cliente:', error);
+      setPromocionesCliente([]);
+      toast.error('Error al cargar las promociones');
+    } finally {
+      setCargandoPromocionesCliente(false);
+    }
+  };
+  
+  const cargarFavoritosCliente = async (clienteId: string) => {
+    setCargandoFavoritosCliente(true);
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/clientes/${clienteId}/favoritos`,
+        {
+          headers: {
+            'Authorization': `Bearer ${publicAnonKey}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.favoritos) {
+          setFavoritosCliente(data.favoritos);
+          console.log('✅ Favoritos cargados:', data.favoritos.length, 'productos');
+        } else {
+          setFavoritosCliente([]);
+          console.log('⚠️ No hay productos favoritos');
+        }
+      } else {
+        console.error('❌ Error al cargar favoritos del cliente:', response.status);
+        setFavoritosCliente([]);
+      }
+    } catch (error) {
+      console.error('❌ Error al cargar favoritos del cliente:', error);
+      setFavoritosCliente([]);
+      toast.error('Error al cargar los productos favoritos');
+    } finally {
+      setCargandoFavoritosCliente(false);
+    }
+  };
+  
   const [nuevoCliente, setNuevoCliente] = useState({
     nombre: '',
     telefono: '',
@@ -664,6 +1092,51 @@ export function ClientesGerente() {
       setPvpCalculado(Number(pvp.toFixed(2)));
     }
   }, [precioCoste, precioCosteAuto, multiplicador, pvpManual]);
+
+  // Pre-rellenar datos cuando estamos editando un producto
+  useEffect(() => {
+    if (modoEdicionProducto && productoEditando && modalNuevoProducto) {
+      // Pre-rellenar el tipo de producto
+      if (productoEditando.tipoProducto) {
+        setTipoProducto(productoEditando.tipoProducto);
+      }
+      // Pre-rellenar campos del paso 2 (información general)
+      if (productoEditando.nombre) setNombreProducto(productoEditando.nombre);
+      if (productoEditando.categoria) setCategoriaProducto(productoEditando.categoria);
+      if (productoEditando.subcategoria) setSubcategoriaProducto(productoEditando.subcategoria);
+      if (productoEditando.descripcionCorta) setDescripcionCorta(productoEditando.descripcionCorta);
+      if (productoEditando.descripcionLarga) setDescripcionLarga(productoEditando.descripcionLarga);
+      if (productoEditando.alergenos) setAlergenosSeleccionados(productoEditando.alergenos);
+      if (productoEditando.etiquetas) setEtiquetasSeleccionadas(productoEditando.etiquetas);
+      // Pre-rellenar visibilidad
+      if (typeof productoEditando.visibilidadTPV !== 'undefined') {
+        setVisibilidadTPV(productoEditando.visibilidadTPV);
+      }
+      if (typeof productoEditando.visibilidadApp !== 'undefined') {
+        setVisibilidadApp(productoEditando.visibilidadApp);
+      }
+    }
+  }, [modoEdicionProducto, productoEditando, modalNuevoProducto]);
+
+  // Reset cuando se cierra el modal
+  useEffect(() => {
+    if (!modalNuevoProducto) {
+      setModoEdicionProducto(false);
+      setProductoEditando(null);
+      setPasoActual(1);
+      setTipoProducto('simple');
+      // Reset de campos del formulario
+      setNombreProducto('');
+      setCategoriaProducto('');
+      setSubcategoriaProducto('');
+      setDescripcionCorta('');
+      setDescripcionLarga('');
+      setAlergenosSeleccionados([]);
+      setEtiquetasSeleccionadas([]);
+      setVisibilidadTPV(true);
+      setVisibilidadApp(true);
+    }
+  }, [modalNuevoProducto]);
 
   const clientes = clientesState;
 
@@ -1114,23 +1587,22 @@ export function ClientesGerente() {
   const clientesFiltrados = useMemo(() => {
     let resultado = [...clientes];
 
-    // 🔍 FILTRO 1: MARCA (Estado)
-    // En producción: filtrar por marca_id desde BBDD
-    // Ejemplo: WHERE marca_id = ? (si filtroMarca !== 'todas')
-    if (filtroMarca !== 'todas') {
-      // MOCK: Como no tenemos marca_id en clientes, por ahora mostramos todos
-      // TODO Backend: resultado = resultado.filter(c => c.marca_id === filtroMarca);
+    // 🔍 FILTRO 1: CONTEXTO (Empresa/Marca/PDV) - Desde selectedContext
+    // En producción: filtrar por empresa_id, marca_id, pdv_id desde BBDD
+    // Ejemplo: WHERE empresa_id IN (?) AND marca_id IN (?) AND pdv_id IN (?)
+    if (selectedContext.length > 0) {
+      // Extraer todos los PDV IDs del contexto seleccionado
+      const pdvIds = selectedContext
+        .filter(ctx => ctx.punto_venta_id !== null)
+        .map(ctx => ctx.punto_venta_id!);
+      
+      if (pdvIds.length > 0) {
+        // MOCK: Como no tenemos pdv_id en clientes, por ahora mostramos todos
+        // TODO Backend: resultado = resultado.filter(c => pdvIds.includes(c.pdv_habitual_id));
+      }
     }
 
-    // 🔍 FILTRO 2: PDV (Punto de Venta)
-    // En producción: filtrar por PDV desde BBDD
-    // Ejemplo: WHERE pdv_id IN (?) (si filtroPDV.length > 0)
-    if (filtroPDV && filtroPDV.length > 0) {
-      // MOCK: Como no tenemos pdv_id en clientes, por ahora mostramos todos
-      // TODO Backend: resultado = resultado.filter(c => filtroPDV.includes(c.pdv_habitual_id));
-    }
-
-    // 🔍 FILTRO 3: PERIODO (Fecha de última compra)
+    // 🔍 FILTRO 2: PERIODO (Fecha de última compra)
     // En producción: filtrar por fecha_ultimo_pedido desde BBDD
     // Ejemplo: WHERE fecha_ultimo_pedido >= DATE_SUB(NOW(), INTERVAL ? DAY)
     if (filtroPeriodo) {
@@ -1214,7 +1686,7 @@ export function ClientesGerente() {
     }
 
     return resultado;
-  }, [clientes, filtroMarca, filtroPDV, filtroPeriodo, filtroCanal, busquedaCliente, busquedaCodigoPostal, ordenClienteColumna, ordenClienteDireccion]);
+  }, [clientes, selectedContext, filtroPeriodo, filtroCanal, busquedaCliente, busquedaCodigoPostal, ordenClienteColumna, ordenClienteDireccion]);
 
   // Función para manejar ordenamiento de clientes
   const handleOrdenarClientes = (columna: string) => {
@@ -1436,8 +1908,7 @@ export function ClientesGerente() {
       suma_total: facturasFiltradas.reduce((sum, f) => sum + f.total, 0),
       filtros_aplicados: {
         // Filtros superiores
-        marca: filtroMarca,
-        pdv: filtroPDV,
+        contexto: selectedContext,
         periodo: filtroPeriodo,
         canal: filtroCanal,
         // Filtros de tabla
@@ -1592,9 +2063,7 @@ export function ClientesGerente() {
       total_facturado: clientesFiltrados.reduce((sum, c) => sum + (c.numeroPedidos * c.ticketMedio), 0),
       filtros_aplicados: {
         // Filtros superiores
-        familia: filtroFamilia,
-        marca: filtroMarca,
-        pdv: filtroPDV,
+        contexto: selectedContext,
         periodo: filtroPeriodo,
         canal: filtroCanal,
         // Filtros de tabla
@@ -1611,9 +2080,7 @@ export function ClientesGerente() {
       num_clientes: clientesFiltrados.length,
       total_facturado: datosExportacion.total_facturado,
       filtros_superiores: {
-        familia: filtroFamilia,
-        marca: filtroMarca,
-        pdv: filtroPDV,
+        contexto: selectedContext,
         periodo: filtroPeriodo,
         canal: filtroCanal
       },
@@ -1727,9 +2194,7 @@ export function ClientesGerente() {
         : '€0.00',
       filtros_aplicados: {
         // Filtros superiores
-        familia: filtroFamilia,
-        marca: filtroMarca,
-        pdv: filtroPDV,
+        contexto: selectedContext,
         periodo: filtroPeriodo,
         canal: filtroCanal,
         // Filtros de tabla
@@ -1746,9 +2211,7 @@ export function ClientesGerente() {
       num_productos: productosFiltrados.length,
       margen_promedio: datosExportacion.margen_promedio,
       filtros_superiores: {
-        familia: filtroFamilia,
-        marca: filtroMarca,
-        pdv: filtroPDV,
+        contexto: selectedContext,
         periodo: filtroPeriodo,
         canal: filtroCanal
       },
@@ -1957,238 +2420,79 @@ export function ClientesGerente() {
    */
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
-            <span className="hidden sm:inline">Clientes y Productos</span>
-            <span className="sm:hidden">Clientes</span>
-          </h2>
-          <p className="text-gray-600 text-xs sm:text-sm">
-            <span className="hidden sm:inline">Gestión completa de clientes, productos, facturación y promociones</span>
-            <span className="sm:hidden">Gestión integral</span>
-          </p>
-        </div>
-        
-        {/* Botones de Acción */}
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button 
-            className="bg-teal-600 hover:bg-teal-700 flex-1 sm:flex-none h-9 sm:h-10 text-sm"
-            onClick={() => {
-              console.log('📤 EVENTO: NUEVO_PRODUCTO_INICIADO');
-              setModalNuevoProducto(true);
-            }}
-          >
-            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            <span className="hidden sm:inline">Nuevo Producto</span>
-            <span className="sm:hidden">Producto</span>
-          </Button>
-          
-          <Button 
-            className="bg-teal-600 hover:bg-teal-700 flex-1 sm:flex-none h-9 sm:h-10 text-sm"
-            onClick={() => setModalNuevoCliente(true)}
-          >
-            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            <span className="hidden sm:inline">Nuevo Cliente</span>
-            <span className="sm:hidden">Cliente</span>
-          </Button>
-        </div>
+    <div className="space-y-0 sm:space-y-6">
+      {/* Header - Solo visible en desktop, oculto en móvil */}
+      <div className="hidden sm:block">
+        <h2 className="text-2xl md:text-3xl text-gray-900 leading-tight font-semibold" style={{ fontFamily: 'Poppins, sans-serif' }}>
+          Productos y Clientes
+        </h2>
+        <p className="text-gray-500 text-sm mt-0.5 leading-tight">
+          Gestión completa de productos, promociones, clientes y facturación
+        </p>
       </div>
 
-      {/* Tabs con Filtros */}
+      {/* Tabs con Filtros - Super compactos en móvil */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto gap-0.5 sm:gap-1">
-          <TabsTrigger value="clientes" className="py-2 sm:py-2.5 text-xs sm:text-sm">
-            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 sm:hidden" />
-            Clientes
-          </TabsTrigger>
-          <TabsTrigger value="facturacion" className="py-2 sm:py-2.5 text-xs sm:text-sm">
-            <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 sm:hidden" />
-            <span className="hidden sm:inline">Facturación</span>
-            <span className="sm:hidden">Facturas</span>
-          </TabsTrigger>
-          <TabsTrigger value="productos" className="py-2 sm:py-2.5 text-xs sm:text-sm">
-            <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 sm:hidden" />
-            Productos
-          </TabsTrigger>
-          <TabsTrigger value="promociones" className="py-2 sm:py-2.5 text-xs sm:text-sm">
-            <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 sm:hidden" />
-            <span className="hidden sm:inline">Promociones</span>
-            <span className="sm:hidden">Promos</span>
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-2 px-2 scrollbar-hide">
+          <TabsList className="inline-flex w-auto gap-0.5 sm:gap-1 bg-gray-100/80 p-0.5 sm:p-1 min-w-max rounded-lg">
+            <TabsTrigger 
+              value="productos" 
+              className="py-1.5 px-2.5 sm:py-2.5 sm:px-4 text-[11px] sm:text-sm flex items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 data-[state=inactive]:text-gray-600 transition-all whitespace-nowrap rounded-md font-medium"
+            >
+              <Package className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span>Productos</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="promociones" 
+              className="py-1.5 px-2.5 sm:py-2.5 sm:px-4 text-[11px] sm:text-sm flex items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 data-[state=inactive]:text-gray-600 transition-all whitespace-nowrap rounded-md font-medium"
+            >
+              <Tag className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span>Promociones</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="clientes" 
+              className="py-1.5 px-2.5 sm:py-2.5 sm:px-4 text-[11px] sm:text-sm flex items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 data-[state=inactive]:text-gray-600 transition-all whitespace-nowrap rounded-md font-medium"
+            >
+              <Users className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span>Clientes</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="facturacion" 
+              className="py-1.5 px-2.5 sm:py-2.5 sm:px-4 text-[11px] sm:text-sm flex items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 data-[state=inactive]:text-gray-600 transition-all whitespace-nowrap rounded-md font-medium"
+            >
+              <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span>Facturación</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-        {/* Filtros Superiores Dinámicos - Se adaptan según la pestaña activa */}
-        <Card className="mt-4 sm:mt-6 bg-gradient-to-r from-teal-50 to-blue-50 border-teal-200">
-          <CardContent className="p-3 sm:p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {/* Filtro 1 - Varía según pestaña */}
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">
-                  {activeTab === 'clientes' && 'Segmento'}
-                  {activeTab === 'facturacion' && 'Estado'}
-                  {activeTab === 'productos' && 'Familia'}
-                  {activeTab === 'promociones' && 'Tipo de Promoción'}
-                </Label>
-                <Select 
-                  value={activeTab === 'promociones' ? 'todas' : filtroFamilia} 
-                  onValueChange={(value: any) => setFiltroFamilia(value)}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeTab === 'clientes' && (
-                      <>
-                        <SelectItem value="todas">👥 Todos</SelectItem>
-                        <SelectItem value="vip">⭐ VIP</SelectItem>
-                        <SelectItem value="regulares">🔄 Regulares</SelectItem>
-                        <SelectItem value="nuevos">✨ Nuevos</SelectItem>
-                      </>
-                    )}
-                    {activeTab === 'facturacion' && (
-                      <>
-                        <SelectItem value="todas">📄 Todas</SelectItem>
-                        <SelectItem value="verificado">✅ Verificadas</SelectItem>
-                        <SelectItem value="pendiente">⏳ Pendientes</SelectItem>
-                      </>
-                    )}
-                    {activeTab === 'productos' && (
-                      <>
-                        <SelectItem value="todas">🍕🍔 Todas</SelectItem>
-                        <SelectItem value="pizzas">🍕 Pizzas</SelectItem>
-                        <SelectItem value="burguers">🍔 Burguers</SelectItem>
-                      </>
-                    )}
-                    {activeTab === 'promociones' && (
-                      <>
-                        <SelectItem value="todas">🎁 Todas</SelectItem>
-                        <SelectItem value="descuento">💰 Descuento %</SelectItem>
-                        <SelectItem value="2x1">🎯 2x1</SelectItem>
-                        <SelectItem value="3x2">🎊 3x2</SelectItem>
-                        <SelectItem value="precio_fijo">💵 Precio fijo</SelectItem>
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
+        {/* Filtros Horizontales con Scroll - Ultra compactos en móvil */}
+        <div className="mt-2 sm:mt-4">
+          {/* 📋 BACKEND: Estos filtros deben pasarse como parámetros a todas las consultas de: CLIENTE, FACTURA, PRODUCTO, PROMOCION. */}
+          <div className="overflow-x-auto scrollbar-hide pb-2">
+            <div className="flex items-center gap-2 min-w-max px-1">
+              {/* Filtro Contexto Jerárquico - Compacto */}
+              <div className="flex-shrink-0" style={{ minWidth: '180px', maxWidth: '260px' }}>
+                <FiltroContextoJerarquico
+                  selectedContext={selectedContext}
+                  onChange={setSelectedContext}
+                />
               </div>
 
-              {/* Filtro PDV - Multiselección */}
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Punto de Venta</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      className="w-full justify-between bg-white text-sm h-10"
-                    >
-                      <span className="truncate">
-                        {filtroPDV.length === 0 
-                          ? 'Todos los PDVs' 
-                          : `${filtroPDV.length} seleccionado${filtroPDV.length > 1 ? 's' : ''}`
-                        }
-                      </span>
-                      <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-3" align="start">
-                    <div className="space-y-3">
-                      {/* Empresa */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Empresa</Label>
-                        {EMPRESAS_ARRAY.map(empresa => (
-                          <div key={empresa.id} className="flex items-center gap-2">
-                            <Checkbox 
-                              id={`empresa-${empresa.id}`}
-                              checked={filtroPDV.includes(empresa.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, empresa.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== empresa.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`empresa-${empresa.id}`} className="text-sm cursor-pointer">
-                              🏢 {getNombreEmpresa(empresa.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Puntos de Venta */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Puntos de Venta</Label>
-                        <div className="space-y-2">
-                          {PUNTOS_VENTA_ARRAY.map(pdv => (
-                            <div key={pdv.id} className="flex items-center gap-2">
-                              <Checkbox 
-                                id={`pdv-${pdv.id}`}
-                                checked={filtroPDV.includes(pdv.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setFiltroPDV([...filtroPDV, pdv.id]);
-                                  } else {
-                                    setFiltroPDV(filtroPDV.filter(item => item !== pdv.id));
-                                  }
-                                }}
-                              />
-                              <label htmlFor={`pdv-${pdv.id}`} className="text-sm cursor-pointer">
-                                📍 {getNombrePDVConMarcas(pdv.id)}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Marcas */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Marcas</Label>
-                        <div className="space-y-2">
-                          {MARCAS_ARRAY.map(marca => (
-                            <div key={marca.id} className="flex items-center gap-2">
-                              <Checkbox 
-                                id={`marca-${marca.id}`}
-                                checked={filtroPDV.includes(marca.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setFiltroPDV([...filtroPDV, marca.id]);
-                                  } else {
-                                    setFiltroPDV(filtroPDV.filter(item => item !== marca.id));
-                                  }
-                                }}
-                              />
-                              <label htmlFor={`marca-${marca.id}`} className="text-sm cursor-pointer">
-                                {getIconoMarca(marca.id)} {getNombreMarca(marca.id)}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Botón limpiar */}
-                      {filtroPDV.length > 0 && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="w-full text-xs text-red-600 hover:text-red-700"
-                          onClick={() => setFiltroPDV([])}
-                        >
-                          Limpiar selección
-                        </Button>
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              {/* Filtro Periodo */}
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Periodo</Label>
+              {/* Filtro Periodo - Chip ultra compacto */}
+              <div className="flex-shrink-0">
                 <Select value={filtroPeriodo} onValueChange={(value: any) => setFiltroPeriodo(value)}>
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
+                  <SelectTrigger className="h-8 sm:h-9 border-gray-300 bg-white hover:bg-gray-50 transition-colors rounded-full px-2.5 sm:px-4 text-[11px] sm:text-sm border-0 shadow-sm ring-1 ring-gray-200 hover:ring-gray-300">
+                    <div className="flex items-center gap-1 sm:gap-1.5">
+                      <span className="text-gray-700 text-xs sm:text-base">📅</span>
+                      <span className="font-medium">
+                        {filtroPeriodo === '7' ? '7d' :
+                         filtroPeriodo === '30' ? '30d' :
+                         filtroPeriodo === '90' ? '90d' :
+                         filtroPeriodo === 'mes' ? 'Mes' :
+                         'Año'}
+                      </span>
+                    </div>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="7">Últimos 7 días</SelectItem>
@@ -2200,119 +2504,93 @@ export function ClientesGerente() {
                 </Select>
               </div>
 
-              {/* Filtro Canal */}
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Canal de Venta</Label>
+              {/* Filtro Canal - Chip interactivo */}
+              <div className="flex-shrink-0">
                 <Select value={filtroCanal} onValueChange={(value: any) => setFiltroCanal(value)}>
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
+                  <SelectTrigger className="h-8 sm:h-9 border-gray-300 bg-white hover:bg-gray-50 transition-colors rounded-full px-2.5 sm:px-4 text-[11px] sm:text-sm border-0 shadow-sm ring-1 ring-gray-200 hover:ring-gray-300">
+                    <div className="flex items-center gap-1 sm:gap-1.5">
+                      <span className="text-gray-700 text-xs sm:text-base">
+                        {filtroCanal === 'todos' 
+                          ? '🔀' 
+                          : canalesActivos.find(c => c.slug === filtroCanal)?.icono || '📊'}
+                      </span>
+                      <span className="font-medium">
+                        {filtroCanal === 'todos' 
+                          ? 'Todos' 
+                          : canalesActivos.find(c => c.slug === filtroCanal)?.nombre_corto || 'Canal'}
+                      </span>
+                    </div>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="todos">Todos los canales</SelectItem>
-                    <SelectItem value="tpv">🏪 TPV (Tienda)</SelectItem>
-                    <SelectItem value="online">🌐 Online (App/Web)</SelectItem>
+                    <SelectItem value="todos">🔀 Todos los canales</SelectItem>
+                    {canalesActivos.map(canal => (
+                      <SelectItem key={canal.id} value={canal.slug}>
+                        {canal.icono} {canal.nombre}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* Indicador de filtros activos */}
-            <div className="flex items-center gap-1.5 sm:gap-2 mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-teal-200 flex-wrap">
-              <span className="text-[10px] sm:text-xs text-gray-600 shrink-0">Filtros activos:</span>
-              {filtroMarca !== 'todas' && (
-                <Badge variant="outline" className="bg-white text-[10px] sm:text-xs h-5 sm:h-6">
-                  {activeTab === 'clientes' && (filtroMarca === 'vip' ? '⭐ VIP' : filtroMarca === 'regulares' ? '🔄 Regulares' : '✨ Nuevos')}
-                  {activeTab === 'facturacion' && (filtroMarca === 'verificado' ? '✅ Verificadas' : '⏳ Pendientes')}
-                  {activeTab === 'productos' && (filtroMarca === 'pizzas' ? '🍕 Pizzas' : '🍔 Burguers')}
-                  {activeTab === 'promociones' && (
-                    filtroMarca === 'descuento' ? '💰 Descuento' :
-                    filtroMarca === '2x1' ? '🎯 2x1' :
-                    filtroMarca === '3x2' ? '🎊 3x2' :
-                    '💵 Precio fijo'
-                  )}
-                </Badge>
-              )}
-              {filtroPDV.length > 0 && (
-                <Badge variant="outline" className="bg-white text-[10px] sm:text-xs h-5 sm:h-6">
-                  Filtros: {filtroPDV.map(id => {
-                    if (EMPRESAS[id]) return getNombreEmpresa(id);
-                    if (PUNTOS_VENTA[id]) return PUNTOS_VENTA[id].nombre;
-                    if (MARCAS[id]) return getNombreMarca(id);
-                    return id;
-                  }).join(', ')}
-                </Badge>
-              )}
-              {filtroPeriodo && (
-                <Badge variant="outline" className="bg-white text-[10px] sm:text-xs h-5 sm:h-6">
-                  <span className="hidden sm:inline">Periodo: </span>{
-                    filtroPeriodo === '7' ? '7d' :
-                    filtroPeriodo === '30' ? '30d' :
-                    filtroPeriodo === '90' ? '90d' :
-                    filtroPeriodo === 'mes' ? 'Mes' :
-                    'Año'
-                  }
-                </Badge>
-              )}
-              {filtroCanal !== 'todos' && (
-                <Badge variant="outline" className="bg-white text-[10px] sm:text-xs h-5 sm:h-6">
-                  {filtroCanal === 'tpv' ? '🏪 TPV' : '🌐 Online'}
-                </Badge>
-              )}
-              {(filtroMarca !== 'todas' || filtroPDV.length > 0 || filtroCanal !== 'todos') && (
+              {/* Botón limpiar filtros - Solo si hay filtros activos */}
+              {(selectedContext.length > 0 || filtroPeriodo !== '30' || filtroCanal !== 'todos') && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="h-5 sm:h-6 text-[10px] sm:text-xs text-red-600 hover:text-red-700 ml-auto px-2"
+                  className="h-8 sm:h-9 text-[11px] sm:text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-full px-2.5 sm:px-4 flex-shrink-0"
                   onClick={() => {
-                    setFiltroMarca('todas');
-                    setFiltroPDV([]);
+                    setSelectedContext([]);
                     setFiltroPeriodo('30');
                     setFiltroCanal('todos');
                     toast.info('Filtros restablecidos');
                   }}
                 >
-                  Limpiar filtros
+                  <span className="hidden sm:inline">✕ Limpiar</span>
+                  <span className="sm:hidden">✕</span>
                 </Button>
               )}
             </div>
-
-            {/* Nota para el programador */}
-            <div className="mt-2 sm:mt-3 p-2 bg-blue-100 border border-blue-300 rounded text-[10px] sm:text-xs text-blue-800">
-              <strong className="hidden sm:inline">📋 Para el programador:</strong><strong className="sm:hidden">📋</strong> Estos filtros deben pasarse como parámetros a todas las consultas de:
-              CLIENTE, FACTURA, PRODUCTO, PROMOCION.
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
 
 
         {/* TAB: Clientes */}
         {/* 
           📊 CONEXIÓN DATOS: 
-          - Consultar tabla CLIENTE con filtros: filtroMarca, filtroPDV, filtroPeriodo, filtroCanal
+          - Consultar tabla CLIENTE con filtros: selectedContext (empresa/marca/pdv), filtroPeriodo, filtroCanal
           - JOIN con FACTURA para calcular: nº_pedidos, ticket_medio, fecha_ultimo_pedido
           - Ordenar por fecha_ultimo_pedido DESC
           - Incluir segmentos y tipo_cliente para chips visuales
         */}
-        <TabsContent value="clientes" className="mt-4 sm:mt-6">
+        <TabsContent value="clientes" className="mt-2 sm:mt-6">
           <Card>
-            <CardHeader className="p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <CardHeader className="p-3 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                 <div>
-                  <CardTitle className="text-base sm:text-lg md:text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                  <CardTitle className="text-sm sm:text-lg md:text-xl font-semibold" style={{ fontFamily: 'Poppins, sans-serif' }}>
                     <span className="hidden sm:inline">Listado de Clientes</span>
                     <span className="sm:hidden">Clientes</span>
                   </CardTitle>
-                  <p className="text-xs sm:text-sm text-gray-600">
+                  <p className="text-[11px] sm:text-sm text-gray-600 mt-0.5">
                     <span className="hidden sm:inline">Ordenados del más reciente al más antiguo • </span>{clientesFiltrados.length} clientes
                   </p>
                 </div>
                 
                 {/* Botones de acción */}
                 <div className="flex gap-2 w-full sm:w-auto">
+                  {/* Botón + Cliente - Solo ícono en móvil */}
+                  <Button 
+                    className="bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 flex-1 sm:flex-none h-8 sm:h-9 px-2 sm:px-4 text-xs sm:text-sm shadow-md hover:shadow-lg transition-all rounded-lg font-medium"
+                    onClick={() => setModalNuevoCliente(true)}
+                  >
+                    <Plus className="w-4 h-4 sm:mr-1.5" />
+                    <span className="hidden sm:inline">Cliente</span>
+                  </Button>
+
                   <Button 
                     size="sm" 
-                    className="bg-purple-600 hover:bg-purple-700 flex-1 sm:flex-none h-8 sm:h-9 text-xs sm:text-sm"
+                    className="bg-[#ED1C24] hover:bg-[#c91820] text-white flex-1 sm:flex-none h-9 sm:h-10 text-xs sm:text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                   >
                     <Gift className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5" />
                     <span className="hidden sm:inline">Promoción</span>
@@ -2636,7 +2914,8 @@ export function ClientesGerente() {
                             <input 
                               type="checkbox" 
                               className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                              defaultChecked={cliente.promocion}
+                              checked={cliente.promocion}
+                              onChange={() => handleTogglePromocion(cliente.id)}
                             />
                           </div>
                         </td>
@@ -2672,7 +2951,7 @@ export function ClientesGerente() {
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => {
-                                  // 🔌 EVENTO: CLIENTE_VISUALIZADO
+                                  // ��� EVENTO: CLIENTE_VISUALIZADO
                                   // Payload: { id_cliente: cliente.id, timestamp: new Date(), seccion: 'resumen' }
                                   setClienteSeleccionado(cliente);
                                   setModoEdicion(false);
@@ -2729,7 +3008,7 @@ export function ClientesGerente() {
         {/* 
           📊 CONEXIÓN DATOS: 
           - Consultar tabla FACTURA + JOIN CLIENTE + JOIN PDV + JOIN MARCA
-          - Aplicar filtros: filtroMarca, filtroPDV, filtroPeriodo, filtroCanal
+          - Aplicar filtros: selectedContext (empresa/marca/pdv), filtroPeriodo, filtroCanal
           - JOIN con LINEA_FACTURA + PRODUCTO para columna "productos" (chips)
           - Incluir: id_factura, fecha, cliente (nombre + id), total, metodo_pago, estado_verifactu, pdv, marca_id
           - Eventos: FACTURA_VISTA, VER_CLIENTE_DESDE_FACTURA, DESCARGAR_PDF_VERIFACTU, EXPORTAR_FACTURAS
@@ -2744,7 +3023,7 @@ export function ClientesGerente() {
           
           🏢 SEGMENTACIÓN POR EMPRESAS:
           - Cada factura tiene marca_id (hoypecamos, modofmio, burguer)
-          - Los filtros superiores (filtroMarca) segmentan automáticamente
+          - Los filtros superiores (selectedContext) segmentan automáticamente
           - Los datos se muestran solo de la marca seleccionada
           - Cada marca tiene su propia numeración de facturas
           - Verifactu se integra por marca/empresa independiente
@@ -3016,7 +3295,7 @@ export function ClientesGerente() {
         {/* 
           📊 CONEXIÓN DATOS: 
           - Consultar tabla PROMOCION + JOIN PROMOCION_PRODUCTO + JOIN PRODUCTO
-          - Aplicar filtros: filtroMarca (aplica_marca), filtroPDV (aplica_pdv contiene pdv_id)
+          - Aplicar filtros: selectedContext (aplica_marca/aplica_pdv)
           - Calcular:
             * nº_clientes_impactados = count(PROMOCION_CLIENTE_LOG WHERE id_promocion + fecha_enviada en periodo)
             * escandallo_pack = sum(PRODUCTO.escandallo_unitario * PROMOCION_PRODUCTO.cantidad)
@@ -3047,7 +3326,7 @@ export function ClientesGerente() {
                   <Button
                     size="sm"
                     variant={vistaPromociones === 'fichas' ? 'default' : 'ghost'}
-                    className={`h-8 ${vistaPromociones === 'fichas' ? 'bg-white shadow-sm' : ''}`}
+                    className={`h-8 font-medium rounded-md transition-all ${vistaPromociones === 'fichas' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-sm' : ''}`}
                     onClick={() => setVistaPromociones('fichas')}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" />
@@ -3055,7 +3334,7 @@ export function ClientesGerente() {
                   <Button
                     size="sm"
                     variant={vistaPromociones === 'lista' ? 'default' : 'ghost'}
-                    className={`h-8 ${vistaPromociones === 'lista' ? 'bg-white shadow-sm' : ''}`}
+                    className={`h-8 font-medium rounded-md transition-all ${vistaPromociones === 'lista' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-sm' : ''}`}
                     onClick={() => setVistaPromociones('lista')}
                   >
                     <List className="w-3.5 h-3.5" />
@@ -3063,7 +3342,7 @@ export function ClientesGerente() {
                 </div>
                 
                 <Button 
-                  className="bg-purple-600 hover:bg-purple-700 flex-1 sm:flex-none h-8 sm:h-9 text-xs sm:text-sm"
+                  className="bg-[#ED1C24] hover:bg-[#c91820] text-white flex-1 sm:flex-none h-9 sm:h-10 text-xs sm:text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all min-w-[44px]"
                   onClick={() => {
                     // 🔌 EVENTO: NUEVA_PROMOCION_INICIADA
                     // Payload: { timestamp: new Date() }
@@ -3072,7 +3351,7 @@ export function ClientesGerente() {
                     setModalAñadirPromocion(true);
                   }}
                 >
-                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+                  <Plus className="w-4 h-4 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
                   <span className="hidden sm:inline">Añadir Promoción</span>
                   <span className="sm:hidden">Nueva</span>
                 </Button>
@@ -3124,7 +3403,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-[10px] sm:text-sm text-gray-500"><span className="hidden sm:inline">Válido hasta: </span>30 Nov</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700 h-8 sm:h-9 text-xs sm:text-sm">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-xs sm:text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3171,7 +3450,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-sm text-gray-500">Válido hasta: 31 Dic 2025</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3218,7 +3497,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-sm text-gray-500">Válido hasta: 15 Dic 2025</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3265,7 +3544,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-sm text-gray-500">Válido hasta: 20 Dic 2025</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3312,7 +3591,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-sm text-gray-500">Válido hasta: 31 Dic 2025</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3359,7 +3638,7 @@ export function ClientesGerente() {
                     </Badge>
                     <span className="text-sm text-gray-500">Válido hasta: 31 Ene 2026</span>
                   </div>
-                  <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                     Ver detalles
                   </Button>
                 </CardContent>
@@ -3806,8 +4085,8 @@ export function ClientesGerente() {
         {/* TAB: Productos */}
         {/* 
           📊 CONEXIÓN DATOS: 
-          - Consultar tabla PRODUCTO + JOIN STOCK_PDV (filtrar por filtroPDV activo)
-          - Aplicar filtros: filtroMarca, filtroPDV (para stock y PDV Top)
+          - Consultar tabla PRODUCTO + JOIN STOCK_PDV (filtrar por selectedContext)
+          - Aplicar filtros: selectedContext (empresa/marca/pdv para stock y PDV Top)
           - Calcular: 
             * margen = (pvp - escandallo_unitario) / pvp
             * stock = sum(STOCK_PDV.stock_actual) para PDVs filtrados
@@ -3818,126 +4097,432 @@ export function ClientesGerente() {
             * PRODUCTO_ACTIVADO/DESACTIVADO (id_producto, pdv_id, activo)
             * VER_ESCANDALLO (id_producto)
         */}
-        <TabsContent value="productos" className="mt-4 sm:mt-6">
-          <div className="space-y-4 sm:space-y-6">
-            {/* Header */}
-            <div className="flex items-start justify-between">
+        <TabsContent value="productos" className="mt-2 sm:mt-6">
+          <div className="space-y-2 sm:space-y-6">
+            {/* Header - Ultra compacto en móvil */}
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
               <div>
-                <h3 className="text-base sm:text-lg md:text-xl text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                <h3 className="text-sm sm:text-lg md:text-xl text-gray-900 leading-tight font-semibold" style={{ fontFamily: 'Poppins, sans-serif' }}>
                   Catálogo de Productos
                 </h3>
-                <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                <p className="text-[11px] sm:text-sm text-gray-500 mt-0.5">
                   <span className="hidden sm:inline">Gestión completa del catálogo · </span>156 productos
                 </p>
               </div>
 
-              {/* Botón de exportación de productos */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
+              <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+                {/* Botón + Producto - Solo ícono en móvil */}
+                <Button 
+                  className="bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 h-8 sm:h-9 px-2 sm:px-4 text-xs sm:text-sm shadow-md hover:shadow-lg transition-all rounded-lg font-medium"
+                  onClick={() => {
+                    console.log('📤 EVENTO: NUEVO_PRODUCTO_INICIADO');
+                    setModalNuevoProducto(true);
+                  }}
+                >
+                  <Plus className="w-4 h-4 sm:mr-1.5" />
+                  <span className="hidden sm:inline">Producto</span>
+                </Button>
+
+                {/* Botones de Vista - Super compactos */}
+                <div className="flex items-center bg-gray-100/80 rounded-lg p-0.5">
+                  <Button
+                    variant={vistaProductos === 'tarjetas' ? 'default' : 'ghost'}
                     size="sm"
-                    className="h-9 gap-2"
+                    className={`h-7 sm:h-8 px-2 sm:px-2.5 text-xs font-medium rounded-md transition-all ${vistaProductos === 'tarjetas' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-sm' : ''}`}
+                    onClick={() => setVistaProductos('tarjetas')}
                   >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Exportar</span>
-                    <ChevronDown className="w-3 h-3" />
+                    <LayoutGrid className="w-3 h-3 sm:w-3.5 sm:h-3.5 sm:mr-1" />
+                    <span className="hidden sm:inline text-[11px]">Tarjetas</span>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuItem 
-                    onClick={() => handleExportarProductosFiltrados('excel')}
-                    className="cursor-pointer"
+                  <Button
+                    variant={vistaProductos === 'tabla' ? 'default' : 'ghost'}
+                    size="sm"
+                    className={`h-7 sm:h-8 px-2 sm:px-2.5 text-xs font-medium rounded-md transition-all ${vistaProductos === 'tabla' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-sm' : ''}`}
+                    onClick={() => setVistaProductos('tabla')}
                   >
-                    <FileSpreadsheet className="w-4 h-4 mr-2 text-green-600" />
-                    Exportar a Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleExportarProductosFiltrados('csv')}
-                    className="cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 mr-2 text-blue-600" />
-                    Exportar a CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleExportarProductosFiltrados('pdf')}
-                    className="cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 mr-2 text-red-600" />
-                    Exportar a PDF
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <List className="w-3 h-3 sm:w-3.5 sm:h-3.5 sm:mr-1" />
+                    <span className="hidden sm:inline text-[11px]">Tabla</span>
+                  </Button>
+                </div>
+
+                {/* Botón de exportación - Solo ícono en móvil */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="h-7 sm:h-8 gap-0 sm:gap-1 px-2 sm:px-3"
+                    >
+                      <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                      <span className="hidden sm:inline text-[11px] ml-1">Exportar</span>
+                      <ChevronDown className="w-2.5 h-2.5 sm:w-3 sm:h-3 ml-0.5 sm:ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem 
+                      onClick={() => handleExportarProductosFiltrados('excel')}
+                      className="cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 mr-2 text-green-600" />
+                      Exportar a Excel
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => handleExportarProductosFiltrados('csv')}
+                      className="cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 mr-2 text-blue-600" />
+                      Exportar a CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => handleExportarProductosFiltrados('pdf')}
+                      className="cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 mr-2 text-red-600" />
+                      Exportar a PDF
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
-            {/* Barra de búsqueda y filtros */}
-            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            {/* Barra de búsqueda - SOLO PARA VISTA TARJETAS */}
+            {vistaProductos === 'tarjetas' && (
               <div className="flex-1 relative">
-                <Search className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400" />
+                <Search className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 w-3 h-3 sm:w-4 sm:h-4 text-gray-400" />
                 <Input
                   placeholder="Buscar productos..."
-                  className="pl-8 sm:pl-10 h-9 sm:h-10 text-sm"
+                  className="pl-7 sm:pl-10 h-8 sm:h-9 text-[11px] sm:text-sm"
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
                 />
               </div>
-              <Button variant="outline" size="sm" className="h-9 sm:h-10 text-sm">
-                <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                Filtros
-              </Button>
-            </div>
+            )}
 
-            {/* Vista móvil - Cards */}
-            <div className="sm:hidden space-y-3">
-              {[1, 2, 3].map((item) => (
-                <Card key={item} className="p-3">
-                  <div className="flex items-start gap-3 mb-3">
-                    <Coffee className="w-10 h-10 text-teal-600 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <div>
-                          <p className="font-medium text-sm text-gray-900">Croissant Mantequilla</p>
-                          <p className="text-xs text-gray-500 font-mono">PRD-001</p>
-                        </div>
-                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] shrink-0">
-                          Bollería
-                        </Badge>
+            {/* VISTA TARJETAS */}
+            {vistaProductos === 'tarjetas' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {/* Producto 1 - Croissant */}
+                <Card 
+                  className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => {
+                    registrarEvento('PRODUCTO_VISUALIZADO', {
+                      id_producto: 'PRD-001',
+                      metadata: {
+                        nombre_producto: 'Croissant Mantequilla',
+                        vista: 'tarjetas',
+                        origen: 'click_tarjeta'
+                      }
+                    });
+                    setModalVerProducto(true);
+                  }}
+                >
+                  <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                    <img 
+                      src="https://images.unsplash.com/photo-1568471382005-99e347e2aef0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjcm9pc3NhbnQlMjBiYWtlcnl8ZW58MXx8fHwxNzY2Nzc5MTI3fDA&ixlib=rb-4.1.0&q=80&w=1080" 
+                      alt="Croissant Mantequilla"
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="mb-3">
+                      <div className="flex items-start justify-between mb-1">
+                        <h4 className="font-semibold text-gray-900">Croissant Mantequilla</h4>
+                        <Award className="w-4 h-4 text-yellow-500 shrink-0" />
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs mt-2">
-                        <div>
-                          <p className="text-gray-500">Escand.</p>
-                          <p className="font-medium text-gray-900">€0.85</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">PVP</p>
-                          <p className="font-semibold text-teal-600">€2.50</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Margen</p>
-                          <p className="font-semibold text-gray-900">66%</p>
-                        </div>
+                      <p className="text-xs text-gray-500 font-mono">PRD-001</p>
+                    </div>
+
+                    {/* Submarcas */}
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      <Badge 
+                        variant="outline" 
+                        className="bg-purple-50 text-purple-700 border-purple-200 text-[10px]"
+                      >
+                        🍕 Modomio €2.50
+                      </Badge>
+                      <Badge 
+                        variant="outline" 
+                        className="bg-orange-50 text-orange-700 border-orange-200 text-[10px]"
+                      >
+                        🍔 BlackBurger €2.50
+                      </Badge>
+                    </div>
+
+                    {/* Métricas */}
+                    <div className="grid grid-cols-3 gap-2 mb-3 pb-3 border-b">
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Escand.</p>
+                        <p className="text-sm font-medium text-gray-900">€0.85</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">PVP</p>
+                        <p className="text-sm font-semibold text-teal-600">€2.50</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Margen</p>
+                        <p className="text-sm font-semibold text-green-600">66%</p>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-xs">
-                      <div className="flex items-center gap-1">
-                        <Award className="w-3 h-3 text-yellow-500" />
-                        <span className="font-medium">#1</span>
-                      </div>
-                      <div className="text-gray-600">
-                        Stock: <span className="font-medium text-teal-600">48</span>/50
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Stock: <span className="font-medium text-teal-600">48</span>/50</span>
                       </div>
                     </div>
-                    <Button size="sm" variant="outline" className="h-7 text-xs px-2">
-                      <Eye className="w-3 h-3" />
-                    </Button>
-                  </div>
+                  </CardContent>
                 </Card>
-              ))}
-            </div>
 
-            {/* Vista desktop - Tabla */}
-            <Card className="hidden sm:block">
+                {/* Producto 2 - Café Espresso */}
+                <Card 
+                  className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => {
+                    registrarEvento('PRODUCTO_VISUALIZADO', {
+                      id_producto: 'PRD-002',
+                      metadata: {
+                        nombre_producto: 'Café Espresso',
+                        vista: 'tarjetas',
+                        origen: 'click_tarjeta'
+                      }
+                    });
+                    setModalVerProducto(true);
+                  }}
+                >
+                  <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                    <img 
+                      src="https://images.unsplash.com/photo-1645445644664-8f44112f334c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxlc3ByZXNzbyUyMGNvZmZlZSUyMGN1cHxlbnwxfHx8fDE3NjY3NzQzMDR8MA&ixlib=rb-4.1.0&q=80&w=1080" 
+                      alt="Café Espresso"
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="mb-3">
+                      <div className="flex items-start justify-between mb-1">
+                        <h4 className="font-semibold text-gray-900">Café Espresso</h4>
+                        <Award className="w-4 h-4 text-gray-300 shrink-0" />
+                      </div>
+                      <p className="text-xs text-gray-500 font-mono">PRD-002</p>
+                    </div>
+
+                    {/* Submarcas */}
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      <Badge 
+                        variant="outline" 
+                        className="bg-purple-50 text-purple-700 border-purple-200 text-[10px]"
+                      >
+                        🍕 Modomio €1.50
+                      </Badge>
+                    </div>
+
+                    {/* Métricas */}
+                    <div className="grid grid-cols-3 gap-2 mb-3 pb-3 border-b">
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Escand.</p>
+                        <p className="text-sm font-medium text-gray-900">€0.35</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">PVP</p>
+                        <p className="text-sm font-semibold text-teal-600">€1.50</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Margen</p>
+                        <p className="text-sm font-semibold text-green-600">77%</p>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Stock: <span className="font-medium text-teal-600">95</span>/100</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Producto 3 - Pan Integral */}
+                <Card 
+                  className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => {
+                    registrarEvento('PRODUCTO_VISUALIZADO', {
+                      id_producto: 'PRD-003',
+                      metadata: {
+                        nombre_producto: 'Pan Integral',
+                        vista: 'tarjetas',
+                        origen: 'click_tarjeta'
+                      }
+                    });
+                    setModalVerProducto(true);
+                  }}
+                >
+                  <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                    <img 
+                      src="https://images.unsplash.com/photo-1626423642268-24cc183cbacb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3aG9sZSUyMGdyYWluJTIwYnJlYWR8ZW58MXx8fHwxNzY2ODE0MDY2fDA&ixlib=rb-4.1.0&q=80&w=1080" 
+                      alt="Pan Integral"
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="mb-3">
+                      <div className="flex items-start justify-between mb-1">
+                        <h4 className="font-semibold text-gray-900">Pan Integral</h4>
+                        <Award className="w-4 h-4 text-gray-300 shrink-0" />
+                      </div>
+                      <p className="text-xs text-gray-500 font-mono">PRD-003</p>
+                    </div>
+
+                    {/* Submarcas */}
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      <Badge 
+                        variant="outline" 
+                        className="bg-orange-50 text-orange-700 border-orange-200 text-[10px]"
+                      >
+                        🍔 BlackBurger €3.50
+                      </Badge>
+                    </div>
+
+                    {/* Métricas */}
+                    <div className="grid grid-cols-3 gap-2 mb-3 pb-3 border-b">
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Escand.</p>
+                        <p className="text-sm font-medium text-gray-900">€1.20</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">PVP</p>
+                        <p className="text-sm font-semibold text-teal-600">€3.50</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Margen</p>
+                        <p className="text-sm font-semibold text-yellow-600">66%</p>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Stock: <span className="font-medium text-teal-600">22</span>/30</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* VISTA TABLA */}
+            {vistaProductos === 'tabla' && (
+            <Card>
               <CardContent className="p-0">
+                {/* Filtros integrados con scroll horizontal */}
+                <div className="border-b bg-gray-50 p-3">
+                  <div className="overflow-x-auto -mx-2 px-2 scrollbar-hide">
+                    <div className="flex gap-2 min-w-max pb-1">
+                      
+                      {/* Búsqueda */}
+                      <div className="relative flex-shrink-0 w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                          placeholder="Buscar productos..."
+                          className="pl-10 h-9 text-sm"
+                          value={busquedaProducto}
+                          onChange={(e) => setBusquedaProducto(e.target.value)}
+                        />
+                      </div>
+
+                      {/* Filtro Submarca */}
+                      <Select value={filtroSubmarca} onValueChange={setFiltroSubmarca}>
+                        <SelectTrigger className="h-9 w-40 text-sm">
+                          <SelectValue placeholder="Submarca" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todas">Todas las submarcas</SelectItem>
+                          <SelectItem value="modomio">🍕 Modomio</SelectItem>
+                          <SelectItem value="blackburger">🍔 BlackBurger</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {/* Filtro Categoría */}
+                      <Select value={filtroCategoria} onValueChange={setFiltroCategoria}>
+                        <SelectTrigger className="h-9 w-40 text-sm">
+                          <SelectValue placeholder="Categoría" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todas">Todas</SelectItem>
+                          <SelectItem value="bolleria">🥐 Bollería</SelectItem>
+                          <SelectItem value="pizzas">🍕 Pizzas</SelectItem>
+                          <SelectItem value="burgers">🍔 Hamburguesas</SelectItem>
+                          <SelectItem value="bebidas">🥤 Bebidas</SelectItem>
+                          <SelectItem value="postres">🍰 Postres</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {/* Filtro Rentabilidad */}
+                      <Select value={filtroRentabilidad} onValueChange={setFiltroRentabilidad}>
+                        <SelectTrigger className="h-9 w-40 text-sm">
+                          <SelectValue placeholder="Rentabilidad" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todas">Todas</SelectItem>
+                          <SelectItem value="alta">🟢 Alta</SelectItem>
+                          <SelectItem value="media">🟡 Media</SelectItem>
+                          <SelectItem value="baja">🔴 Baja</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {/* Filtro Stock */}
+                      <Select value={filtroStock} onValueChange={setFiltroStock}>
+                        <SelectTrigger className="h-9 w-40 text-sm">
+                          <SelectValue placeholder="Stock" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">Todos</SelectItem>
+                          <SelectItem value="disponible">✅ Disponible</SelectItem>
+                          <SelectItem value="bajo">⚠️ Bajo</SelectItem>
+                          <SelectItem value="agotado">❌ Agotado</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {/* Filtro Activo */}
+                      <Select value={filtroActivo} onValueChange={setFiltroActivo}>
+                        <SelectTrigger className="h-9 w-36 text-sm">
+                          <SelectValue placeholder="Estado" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">Todos</SelectItem>
+                          <SelectItem value="activos">Activos</SelectItem>
+                          <SelectItem value="inactivos">Inactivos</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {/* Botón Limpiar Filtros */}
+                      {(busquedaProducto || filtroSubmarca !== 'todas' || filtroCategoria !== 'todas' || filtroRentabilidad !== 'todas' || filtroStock !== 'todos' || filtroActivo !== 'todos') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 text-sm"
+                          onClick={() => {
+                            setBusquedaProducto('');
+                            setFiltroSubmarca('todas');
+                            setFiltroCategoria('todas');
+                            setFiltroRentabilidad('todas');
+                            setFiltroStock('todos');
+                            setFiltroActivo('todos');
+                          }}
+                        >
+                          <X className="w-4 h-4 mr-1" />
+                          Limpiar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contador de resultados */}
+                  <div className="mt-2 text-xs text-gray-600">
+                    Mostrando <span className="font-semibold">156</span> productos
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gray-50 border-b">
@@ -3947,6 +4532,9 @@ export function ClientesGerente() {
                         </th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           Descripción
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Submarcas
                         </th>
                         <th className="text-center py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           Categoría
@@ -3976,7 +4564,20 @@ export function ClientesGerente() {
                     </thead>
                     <tbody>
                       {/* Producto 1 */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          registrarEvento('PRODUCTO_VISUALIZADO', {
+                            id_producto: 'PRD-001',
+                            metadata: {
+                              nombre_producto: 'Croissant Mantequilla',
+                              vista: 'tabla',
+                              origen: 'click_fila'
+                            }
+                          });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-700 font-semibold">PRD-001</span>
                         </td>
@@ -3984,6 +4585,24 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-teal-600" />
                             <span className="font-medium text-gray-900">Croissant Mantequilla</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-purple-50 text-purple-700 border-purple-200 text-xs"
+                            >
+                              🍕 Modomio
+                              <span className="ml-1 font-semibold">€2.50</span>
+                            </Badge>
+                            <Badge 
+                              variant="outline" 
+                              className="bg-orange-50 text-orange-700 border-orange-200 text-xs"
+                            >
+                              🍔 BlackBurger
+                              <span className="ml-1 font-semibold">€2.50</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4024,55 +4643,73 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-8 px-2"
-                              onClick={() => {
-                                // 🔌 EVENTO: PRODUCTO_VISUALIZADO
-                                // Payload: { id_producto: 'PRD-001', timestamp: new Date() }
-                                // Consultar PRODUCTO + STOCK_PDV + ventas en periodo
-                                console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-001' });
-                                setModalVerProducto(true);
-                              }}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-8 px-2"
-                              onClick={() => {
-                                // 🔌 EVENTO: ESCANDALLO_VISUALIZADO
-                                // Payload: { id_producto: 'PRD-001', timestamp: new Date() }
-                                // Consultar ingredientes y costes detallados
-                                console.log('📤 EVENTO: ESCANDALLO_VISUALIZADO', { id_producto: 'PRD-001' });
-                                toast.info('Abriendo escandallo...');
-                              }}
-                            >
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-8 px-2 text-red-600 hover:text-red-700"
-                              onClick={() => {
-                                // 🔌 EVENTO: PRODUCTO_DESACTIVADO
-                                // Payload: { id_producto: 'PRD-001', pdv_id: filtroPDV o 'todos', activo: false, timestamp: new Date() }
-                                // UPDATE STOCK_PDV SET activo_en_pdv = false WHERE id_producto = 'PRD-001'
-                                console.log('📤 EVENTO: PRODUCTO_DESACTIVADO', { id_producto: 'PRD-001', activo: false });
-                                toast.success('Producto desactivado');
-                              }}
-                            >
-                              <PowerOff className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // 🔌 EVENTO: PRODUCTO_VISUALIZADO
+                                    console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-001' });
+                                    setModalVerProducto(true);
+                                  }}
+                                >
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  // 🔌 EVENTO: ESCANDALLO_VISUALIZADO
+                                  console.log('📤 EVENTO: ESCANDALLO_VISUALIZADO', { id_producto: 'PRD-001' });
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // 🔌 EVENTO: PRODUCTO_DESACTIVADO
+                                    console.log('📤 EVENTO: PRODUCTO_DESACTIVADO', { id_producto: 'PRD-001', activo: false });
+                                    toast.success('Producto desactivado');
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <PowerOff className="w-4 h-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
 
                       {/* Producto 2 */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          registrarEvento('PRODUCTO_VISUALIZADO', {
+                            id_producto: 'PRD-002',
+                            metadata: {
+                              nombre_producto: 'Café Espresso',
+                              vista: 'tabla',
+                              origen: 'click_fila'
+                            }
+                          });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-700 font-semibold">PRD-002</span>
                         </td>
@@ -4080,6 +4717,17 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-teal-600" />
                             <span className="font-medium text-gray-900">Café Espresso</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-purple-50 text-purple-700 border-purple-200 text-xs"
+                            >
+                              🍕 Modomio
+                              <span className="ml-1 font-semibold">€1.50</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4120,27 +4768,58 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="touch-target px-2"
-                              onClick={() => setModalVerProducto(true)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2">
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2 text-red-600 hover:text-red-700">
-                              <PowerOff className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setModalVerProducto(true);
+                                }}>
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success('Producto desactivado');
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <PowerOff className="w-4 h-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
 
                       {/* Producto 3 */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-003' });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-700 font-semibold">PRD-003</span>
                         </td>
@@ -4148,6 +4827,17 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-teal-600" />
                             <span className="font-medium text-gray-900">Pan Integral</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-orange-50 text-orange-700 border-orange-200 text-xs"
+                            >
+                              🍔 BlackBurger
+                              <span className="ml-1 font-semibold">€3.50</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4188,27 +4878,58 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="touch-target px-2"
-                              onClick={() => setModalVerProducto(true)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2">
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2 text-red-600 hover:text-red-700">
-                              <PowerOff className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setModalVerProducto(true);
+                                }}>
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success('Producto desactivado');
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <PowerOff className="w-4 h-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
 
                       {/* Producto 4 */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-004' });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-700 font-semibold">PRD-004</span>
                         </td>
@@ -4216,6 +4937,32 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-teal-600" />
                             <span className="font-medium text-gray-900">Tarta de Chocolate</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-purple-50 text-purple-700 border-purple-200 text-xs cursor-pointer hover:shadow-md transition-all"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFiltroSubmarca('modomio');
+                              }}
+                            >
+                              🍕 Modomio
+                              <span className="ml-1 font-semibold">€5.50</span>
+                            </Badge>
+                            <Badge 
+                              variant="outline" 
+                              className="bg-orange-50 text-orange-700 border-orange-200 text-xs cursor-pointer hover:shadow-md transition-all"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFiltroSubmarca('blackburger');
+                              }}
+                            >
+                              🍔 BlackBurger
+                              <span className="ml-1 font-semibold">€6.00</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4256,27 +5003,58 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="touch-target px-2"
-                              onClick={() => setModalVerProducto(true)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2">
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2 text-red-600 hover:text-red-700">
-                              <PowerOff className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setModalVerProducto(true);
+                                }}>
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success('Producto desactivado');
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <PowerOff className="w-4 h-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
 
                       {/* Producto 5 */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-005' });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-700 font-semibold">PRD-005</span>
                         </td>
@@ -4284,6 +5062,21 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-teal-600" />
                             <span className="font-medium text-gray-900">Bocadillo Jamón</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-orange-50 text-orange-700 border-orange-200 text-xs cursor-pointer hover:shadow-md transition-all"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFiltroSubmarca('blackburger');
+                              }}
+                            >
+                              🍔 BlackBurger
+                              <span className="ml-1 font-semibold">€4.20</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4324,27 +5117,58 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="touch-target px-2"
-                              onClick={() => setModalVerProducto(true)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2">
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2 text-red-600 hover:text-red-700">
-                              <PowerOff className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setModalVerProducto(true);
+                                }}>
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success('Producto desactivado');
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <PowerOff className="w-4 h-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
 
                       {/* Producto 6 - Desactivado */}
-                      <tr className="border-b hover:bg-gray-50 transition-colors bg-gray-50 opacity-60">
+                      <tr 
+                        className="border-b hover:bg-gray-50 transition-colors bg-gray-50 opacity-60 cursor-pointer"
+                        onClick={() => {
+                          console.log('📤 EVENTO: PRODUCTO_VISUALIZADO', { id_producto: 'PRD-015' });
+                          setModalVerProducto(true);
+                        }}
+                      >
                         <td className="py-3 px-4">
                           <span className="font-mono text-sm text-gray-500 font-semibold">PRD-015</span>
                         </td>
@@ -4352,6 +5176,17 @@ export function ClientesGerente() {
                           <div className="flex items-center gap-3">
                             <Coffee className="w-8 h-8 text-gray-400" />
                             <span className="font-medium text-gray-500">Empanada Atún</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge 
+                              variant="outline" 
+                              className="bg-gray-50 text-gray-500 border-gray-300 text-xs"
+                            >
+                              🍕 Modomio
+                              <span className="ml-1 font-semibold">€3.20</span>
+                            </Badge>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -4392,21 +5227,46 @@ export function ClientesGerente() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="touch-target px-2"
-                              onClick={() => setModalVerProducto(true)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2">
-                              <FileText className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="touch-target px-2 text-green-600 hover:text-green-700">
-                              <Power className="w-4 h-4" />
-                            </Button>
+                          <div className="flex items-center justify-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setModalVerProducto(true);
+                                }}>
+                                  <Eye className="w-4 h-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.info('Abriendo escandallo...');
+                                }}>
+                                  <FileText className="w-4 h-4 mr-2" />
+                                  Ver escandallo
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success('Producto activado');
+                                  }}
+                                  className="text-green-600"
+                                >
+                                  <Power className="w-4 h-4 mr-2" />
+                                  Activar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
@@ -4415,6 +5275,7 @@ export function ClientesGerente() {
                 </div>
               </CardContent>
             </Card>
+            )}
           </div>
         </TabsContent>
       </Tabs>
@@ -5107,7 +5968,7 @@ export function ClientesGerente() {
               
               {pasoPromocion < 4 ? (
                 <Button
-                  className="bg-purple-600 hover:bg-purple-700"
+                  className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                   onClick={() => {
                     // Validaciones por paso
                     if (pasoPromocion === 2) {
@@ -5411,44 +6272,532 @@ export function ClientesGerente() {
 
                 {/* TAB 2: HISTORIAL */}
                 <TabsContent value="historial" className="space-y-4 mt-4">
+                  {/* Filtros del historial */}
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Select defaultValue="todos">
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue placeholder="Periodo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos</SelectItem>
+                        <SelectItem value="7dias">Últimos 7 días</SelectItem>
+                        <SelectItem value="30dias">Últimos 30 días</SelectItem>
+                        <SelectItem value="90dias">Últimos 90 días</SelectItem>
+                        <SelectItem value="ano">Este año</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select defaultValue="todos">
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue placeholder="Estado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos los estados</SelectItem>
+                        <SelectItem value="entregado">Entregados</SelectItem>
+                        <SelectItem value="cancelado">Cancelados</SelectItem>
+                        <SelectItem value="devuelto">Devueltos</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select defaultValue="todos">
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue placeholder="PDV" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos los PDV</SelectItem>
+                        <SelectItem value="pdv001">PDV001 - Centro</SelectItem>
+                        <SelectItem value="pdv002">PDV002 - Norte</SelectItem>
+                        <SelectItem value="pdv003">PDV003 - Sur</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Resumen de estadísticas del historial */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <Card className="bg-gradient-to-br from-teal-50 to-white border-teal-200">
+                      <CardContent className="p-4 text-center">
+                        <ShoppingCart className="w-5 h-5 text-teal-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">{historialPedidos.length || clienteSeleccionado.numeroPedidos}</p>
+                        <p className="text-xs text-gray-600">Total Pedidos</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-green-50 to-white border-green-200">
+                      <CardContent className="p-4 text-center">
+                        <DollarSign className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          €{historialPedidos.length > 0
+                            ? historialPedidos.reduce((sum, p) => sum + (p.total || 0), 0).toFixed(0)
+                            : (clienteSeleccionado.numeroPedidos * clienteSeleccionado.ticketMedio).toFixed(0)
+                          }
+                        </p>
+                        <p className="text-xs text-gray-600">Gasto Total</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-200">
+                      <CardContent className="p-4 text-center">
+                        <Receipt className="w-5 h-5 text-blue-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {historialPedidos.filter(p => p.factura).length || clienteSeleccionado.numeroPedidos}
+                        </p>
+                        <p className="text-xs text-gray-600">Facturas</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-200">
+                      <CardContent className="p-4 text-center">
+                        <Calendar className="w-5 h-5 text-purple-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {historialPedidos.length > 0
+                            ? new Date(historialPedidos[0].createdAt || historialPedidos[0].fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
+                            : clienteSeleccionado.ultimaCompra
+                          }
+                        </p>
+                        <p className="text-xs text-gray-600">Último Pedido</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Lista de pedidos y facturas */}
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Historial de Pedidos</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-sm">Historial de Pedidos y Facturas</CardTitle>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {cargandoHistorialCliente ? 'Cargando...' : 
+                              historialPedidos.length > 0 ? `${historialPedidos.length} pedidos encontrados` : 
+                              'No hay pedidos registrados'}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="outline" className="gap-2">
+                          <Download className="w-4 h-4" />
+                          Exportar
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-center py-8 text-gray-500">
-                        Funcionalidad en desarrollo
+                      {cargandoHistorialCliente ? (
+                        <div className="text-center py-8">
+                          <RefreshCw className="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
+                          <p className="text-sm text-gray-600">Cargando historial...</p>
+                        </div>
+                      ) : historialPedidos.length === 0 ? (
+                        <div className="text-center py-8">
+                          <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="text-sm text-gray-600">No hay pedidos en el historial</p>
+                          <p className="text-xs text-gray-500 mt-1">Los pedidos aparecerán aquí cuando el cliente realice compras</p>
+                        </div>
+                      ) : (
+                      <div className="space-y-3">
+                        {/* Renderizar pedidos desde el backend */}
+                        {historialPedidos.slice(0, 10).map((pedido, index) => (
+                        <div key={pedido.id || index} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="font-semibold text-gray-900">
+                                  Pedido #{pedido.codigo || pedido.id}
+                                </p>
+                                <Badge className={
+                                  pedido.estado === 'entregado' ? 'bg-green-100 text-green-800 border-green-200' :
+                                  pedido.estado === 'cancelado' ? 'bg-red-100 text-red-800 border-red-200' :
+                                  pedido.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                                  'bg-blue-100 text-blue-800 border-blue-200'
+                                }>
+                                  {pedido.estado === 'entregado' && <CheckCircle className="w-3 h-3 mr-1" />}
+                                  {pedido.estado || 'Pendiente'}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-gray-600">
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-3 h-3" />
+                                  {new Date(pedido.createdAt || pedido.fecha).toLocaleDateString('es-ES', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Store className="w-3 h-3" />
+                                  {pedido.pdv || pedido.pdvId || 'PDV'}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  {pedido.metodoPago === 'tarjeta' ? <CreditCard className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
+                                  {pedido.metodoPago || 'Tarjeta'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                                €{(pedido.total || 0).toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-500">Total pagado</p>
+                            </div>
+                          </div>
+
+                          {/* Productos del pedido */}
+                          {pedido.items && pedido.items.length > 0 && (
+                          <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                            <p className="text-xs text-gray-600 mb-2">Productos:</p>
+                            <div className="space-y-1.5">
+                              {pedido.items.slice(0, 5).map((item: any, idx: number) => (
+                              <div key={idx} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-700">
+                                  {item.cantidad}x {item.productoNombre || item.nombre || item.producto?.nombre || 'Producto'}
+                                </span>
+                                <span className="text-gray-900">€{((item.precioUnitario || item.precio || 0) * item.cantidad).toFixed(2)}</span>
+                              </div>
+                              ))}
+                              {pedido.items.length > 5 && (
+                                <p className="text-xs text-gray-500 italic">+ {pedido.items.length - 5} productos más</p>
+                              )}
+                            </div>
+                          </div>
+                          )}
+
+                          {/* Factura asociada */}
+                          {pedido.factura && (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Receipt className="w-4 h-4 text-blue-600" />
+                              <div>
+                                <p className="text-xs font-medium text-gray-900">Factura {pedido.factura.id || 'N/A'}</p>
+                                <p className="text-[10px] text-gray-500">
+                                  {pedido.factura.certificada ? 'Certificada con Verifactu' : 'Pendiente de certificar'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="outline" className="h-7 text-xs">
+                                <Eye className="w-3 h-3 mr-1" />
+                                Ver
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 text-xs">
+                                <Download className="w-3 h-3 mr-1" />
+                                PDF
+                              </Button>
+                            </div>
+                          </div>
+                          )}
+                        </div>
+                        ))}
+
+                        {/* Indicador de más pedidos */}
+                        {historialPedidos.length > 10 && (
+                          <div className="text-center py-4 border-t">
+                            <p className="text-sm text-gray-600 mb-3">
+                              Mostrando 10 de {historialPedidos.length} pedidos
+                            </p>
+                            <Button variant="outline" size="sm">
+                              Ver todos los pedidos
+                            </Button>
+                          </div>
+                        )}
                       </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
 
                 {/* TAB 3: PROMOCIONES */}
                 <TabsContent value="promociones" className="space-y-4 mt-4">
+                  {cargandoPromocionesCliente ? (
+                    <div className="text-center py-8">
+                      <RefreshCw className="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
+                      <p className="text-sm text-gray-600">Cargando promociones...</p>
+                    </div>
+                  ) : (
+                  <>
+                  {/* Resumen de promociones */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-200">
+                      <CardContent className="p-4 text-center">
+                        <Gift className="w-5 h-5 text-purple-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {promocionesCliente.filter(p => p.estado === 'activa').length}
+                        </p>
+                        <p className="text-xs text-gray-600">Activas</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-green-50 to-white border-green-200">
+                      <CardContent className="p-4 text-center">
+                        <CheckCircle className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {promocionesCliente.filter(p => p.usada || p.estado === 'usada').length}
+                        </p>
+                        <p className="text-xs text-gray-600">Usadas</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-orange-50 to-white border-orange-200">
+                      <CardContent className="p-4 text-center">
+                        <DollarSign className="w-5 h-5 text-orange-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          €{promocionesCliente.reduce((sum, p) => sum + (p.descuentoAplicado || 0), 0).toFixed(2)}
+                        </p>
+                        <p className="text-xs text-gray-600">Ahorrado</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Promociones activas */}
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Promociones Activas</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm">Promociones Activas</CardTitle>
+                        <Badge className="bg-purple-100 text-purple-800">
+                          {promocionesCliente.filter(p => p.estado === 'activa').length} disponibles
+                        </Badge>
+                      </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-center py-8 text-gray-500">
-                        Funcionalidad en desarrollo
+                      {promocionesCliente.length === 0 ? (
+                        <div className="text-center py-6">
+                          <Gift className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                          <p className="text-sm text-gray-600">No hay promociones activas</p>
+                        </div>
+                      ) : (
+                      <div className="space-y-3">
+                        {/* Renderizar promociones desde el backend */}
+                        {promocionesCliente.filter(p => p.estado === 'activa').map((promo, index) => (
+                        <div key={promo.id || index} className="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              {promo.tipo === 'cumpleanos' ? (
+                                <Cake className="w-5 h-5 text-yellow-600" />
+                              ) : (
+                                <Gift className="w-5 h-5 text-purple-600" />
+                              )}
+                              <div>
+                                <p className="font-semibold text-gray-900">{promo.nombre || promo.titulo}</p>
+                                <p className="text-xs text-gray-600">
+                                  Válido hasta: {promo.fechaFin ? new Date(promo.fechaFin).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Sin límite'}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge className={promo.tipo === 'cumpleanos' ? 'bg-yellow-600 text-white' : 'bg-purple-600 text-white'}>
+                              {promo.tipo === 'cumpleanos' ? 'Especial' : 'Activa'}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-gray-700 mb-3">
+                            {promo.descripcion || 'Promoción disponible para este cliente'}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                              <Store className="w-3 h-3" />
+                              <span>{promo.pdv || promo.canal || 'Válido en todos los PDV'}</span>
+                            </div>
+                            {promo.descuento && (
+                              <div className="text-sm font-semibold text-purple-600">
+                                {promo.descuento}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        ))}
                       </div>
+                      )}
                     </CardContent>
                   </Card>
+
+                  {/* Historial de promociones usadas */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Historial de Promociones Usadas</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {promocionesCliente.filter(p => p.usada || p.estado === 'usada').length === 0 ? (
+                        <div className="text-center py-6">
+                          <Clock className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                          <p className="text-sm text-gray-600">No hay promociones usadas</p>
+                        </div>
+                      ) : (
+                      <div className="space-y-2">
+                        {/* Renderizar promociones usadas desde el backend */}
+                        {promocionesCliente.filter(p => p.usada || p.estado === 'usada').slice(0, 5).map((promo, index) => (
+                        <div key={promo.id || index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{promo.nombre || promo.titulo}</p>
+                              <p className="text-xs text-gray-600">
+                                Usado el {promo.fechaUso ? new Date(promo.fechaUso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Fecha desconocida'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-green-600">
+                              -€{(promo.descuentoAplicado || 0).toFixed(2)}
+                            </p>
+                            <p className="text-xs text-gray-500">Ahorrado</p>
+                          </div>
+                        </div>
+                        ))}
+
+                        {/* Ver más */}
+                        {promocionesCliente.filter(p => p.usada || p.estado === 'usada').length > 5 && (
+                        <div className="text-center pt-3">
+                          <Button variant="outline" size="sm">
+                            Ver todas las promociones usadas ({promocionesCliente.filter(p => p.usada || p.estado === 'usada').length})
+                          </Button>
+                        </div>
+                        )}
+                      </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                  </>
+                  )}
                 </TabsContent>
 
                 {/* TAB 4: FAVORITOS */}
                 <TabsContent value="favoritos" className="space-y-4 mt-4">
+                  {cargandoFavoritosCliente ? (
+                    <div className="text-center py-8">
+                      <RefreshCw className="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
+                      <p className="text-sm text-gray-600">Cargando favoritos...</p>
+                    </div>
+                  ) : favoritosCliente.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Heart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-sm text-gray-600">No hay productos favoritos</p>
+                      <p className="text-xs text-gray-500 mt-1">Los productos más pedidos aparecerán aquí</p>
+                    </div>
+                  ) : (
+                  <>
+                  {/* Estadísticas de favoritos */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <Card className="bg-gradient-to-br from-pink-50 to-white border-pink-200">
+                      <CardContent className="p-4 text-center">
+                        <Heart className="w-5 h-5 text-pink-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">{favoritosCliente.length}</p>
+                        <p className="text-xs text-gray-600">Favoritos</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-orange-50 to-white border-orange-200">
+                      <CardContent className="p-4 text-center">
+                        <Coffee className="w-5 h-5 text-orange-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {favoritosCliente.length > 0 ? (favoritosCliente[0].categoria || 'N/A') : '-'}
+                        </p>
+                        <p className="text-xs text-gray-600">Top Categoría</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-200">
+                      <CardContent className="p-4 text-center">
+                        <ShoppingCart className="w-5 h-5 text-blue-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {favoritosCliente.reduce((sum, f) => sum + (f.vecesPedido || f.cantidad || 0), 0)}
+                        </p>
+                        <p className="text-xs text-gray-600">Veces pedido</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="bg-gradient-to-br from-teal-50 to-white border-teal-200">
+                      <CardContent className="p-4 text-center">
+                        <Star className="w-5 h-5 text-teal-600 mx-auto mb-1" />
+                        <p className="text-xl text-gray-900">
+                          {favoritosCliente.length > 0 
+                            ? (favoritosCliente.reduce((sum, f) => sum + (f.valoracion || 0), 0) / favoritosCliente.length).toFixed(1)
+                            : '0.0'
+                          }
+                        </p>
+                        <p className="text-xs text-gray-600">Valoración</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Productos favoritos */}
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Productos Favoritos</CardTitle>
+                      <CardTitle className="text-sm">Productos Más Pedidos</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-center py-8 text-gray-500">
-                        Funcionalidad en desarrollo
+                      <div className="space-y-3">
+                        {/* Renderizar favoritos desde el backend */}
+                        {favoritosCliente.slice(0, 8).map((fav, index) => (
+                        <div key={fav.id || fav.productoId || index} className="flex items-center gap-4 p-3 border rounded-lg hover:bg-gray-50 transition-colors">
+                          <div className="w-16 h-16 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg flex items-center justify-center">
+                            <Coffee className="w-8 h-8 text-orange-600" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-semibold text-gray-900">
+                                {fav.nombre || fav.productoNombre || fav.producto?.nombre || 'Producto'}
+                              </p>
+                              <Heart className="w-4 h-4 text-pink-500 fill-pink-500" />
+                            </div>
+                            <p className="text-xs text-gray-600 mb-1">
+                              Categoría: {fav.categoria || fav.producto?.categoria || 'Sin categoría'}
+                            </p>
+                            <div className="flex items-center gap-3 text-xs text-gray-600">
+                              <span className="flex items-center gap-1">
+                                <ShoppingCart className="w-3 h-3" />
+                                {fav.vecesPedido || fav.cantidad || 0} veces
+                              </span>
+                              {fav.valoracion && (
+                              <span className="flex items-center gap-1">
+                                <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                                {fav.valoracion.toFixed(1)}
+                              </span>
+                              )}
+                              {fav.ultimaCompra && (
+                              <span className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                Última: {new Date(fav.ultimaCompra).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                              </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                              €{(fav.precio || fav.precioUnitario || 0).toFixed(2)}
+                            </p>
+                            <Button size="sm" className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-7 mt-2">
+                              Pedir
+                            </Button>
+                          </div>
+                        </div>
+                        ))}
+                        
+                        {/* Ver más favoritos */}
+                        {favoritosCliente.length > 8 && (
+                        <div className="text-center pt-3">
+                          <Button variant="outline" size="sm">
+                            Ver todos los favoritos ({favoritosCliente.length})
+                          </Button>
+                        </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Categorías favoritas */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Categorías Favoritas</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="p-4 border-2 border-orange-200 rounded-lg bg-orange-50 text-center">
+                          <Coffee className="w-8 h-8 text-orange-600 mx-auto mb-2" />
+                          <p className="font-semibold text-gray-900">Cafetería</p>
+                          <p className="text-xs text-gray-600 mt-1">45% de pedidos</p>
+                        </div>
+                        <div className="p-4 border-2 border-amber-200 rounded-lg bg-amber-50 text-center">
+                          <Package className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+                          <p className="font-semibold text-gray-900">Bollería</p>
+                          <p className="text-xs text-gray-600 mt-1">35% de pedidos</p>
+                        </div>
+                        <div className="p-4 border-2 border-yellow-200 rounded-lg bg-yellow-50 text-center">
+                          <Package className="w-8 h-8 text-yellow-600 mx-auto mb-2" />
+                          <p className="font-semibold text-gray-900">Panadería</p>
+                          <p className="text-xs text-gray-600 mt-1">20% de pedidos</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  </>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
@@ -5465,7 +6814,7 @@ export function ClientesGerente() {
                   Cancelar
                 </Button>
                 <Button
-                  className="bg-teal-600 hover:bg-teal-700"
+                  className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                   onClick={() => {
                     toast.success(`Cliente ${clienteSeleccionado?.nombre} actualizado correctamente`);
                     setModoEdicion(false);
@@ -5542,7 +6891,7 @@ export function ClientesGerente() {
               Cancelar
             </Button>
             <Button 
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
               onClick={() => {
                 if (nuevaAnotacion.trim()) {
                   const now = new Date();
@@ -5764,7 +7113,7 @@ export function ClientesGerente() {
               Cancelar
             </Button>
             <Button 
-              className="bg-teal-600 hover:bg-teal-700" 
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all" 
               onClick={handleCrearCliente}
             >
               Crear Cliente
@@ -6179,27 +7528,30 @@ export function ClientesGerente() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="w-5 h-5 text-teal-600" />
-              Crear Nuevo Producto
+              {modoEdicionProducto ? 'Editar Producto' : 'Crear Nuevo Producto'}
             </DialogTitle>
             <DialogDescription>
-              Completa los {pasoActual === 1 ? '5 pasos' : `${5 - pasoActual + 1} pasos restantes`} del asistente para crear un nuevo producto en tu catálogo.
+              {modoEdicionProducto 
+                ? `Modifica los datos del producto "${productoEditando?.nombre || ''}" siguiendo los ${pasoActual === 1 ? '6 pasos' : `${6 - pasoActual + 1} pasos restantes`} del asistente.`
+                : `Completa los ${pasoActual === 1 ? '6 pasos' : `${6 - pasoActual + 1} pasos restantes`} del asistente para crear un nuevo producto en tu catálogo.`
+              }
             </DialogDescription>
           </DialogHeader>
 
           {/* Indicador de pasos */}
           <div className="flex items-center justify-between mb-6">
-            {[1, 2, 3, 4, 5].map((paso) => (
+            {[1, 2, 3, 4, 5, 6].map((paso) => (
               <div key={paso} className="flex items-center flex-1">
                 <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
-                  pasoActual === paso ? 'bg-teal-600 text-white' : 
-                  pasoActual > paso ? 'bg-teal-100 text-teal-600' : 
+                  pasoActual === paso ? 'bg-[#ED1C24] text-white' : 
+                  pasoActual > paso ? 'bg-red-100 text-[#ED1C24]' : 
                   'bg-gray-100 text-gray-400'
                 } font-semibold text-sm`}>
                   {paso}
                 </div>
-                {paso < 5 && (
+                {paso < 6 && (
                   <div className={`flex-1 h-1 mx-2 ${
-                    pasoActual > paso ? 'bg-teal-600' : 'bg-gray-200'
+                    pasoActual > paso ? 'bg-[#ED1C24]' : 'bg-gray-200'
                   }`} />
                 )}
               </div>
@@ -6264,6 +7616,23 @@ export function ClientesGerente() {
                 </Card>
               </div>
 
+              {/* Mensaje para modo edición */}
+              {modoEdicionProducto && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-4">
+                  <div className="flex items-start gap-3">
+                    <Edit className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-amber-800 font-semibold mb-1">
+                        Estás editando el producto: {productoEditando?.nombre}
+                      </p>
+                      <p className="text-sm text-amber-700">
+                        Puedes modificar el tipo de producto si lo necesitas, pero ten en cuenta que cambiar el tipo puede requerir reconfigurar ingredientes o componentes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
                 <div className="flex items-start gap-3">
                   <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -6296,6 +7665,8 @@ export function ClientesGerente() {
                   <Input 
                     placeholder="Ej: Café con leche grande"
                     className="w-full"
+                    value={nombreProducto}
+                    onChange={(e) => setNombreProducto(e.target.value)}
                   />
                 </div>
 
@@ -6304,15 +7675,30 @@ export function ClientesGerente() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Categoría *
                   </label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent">
-                    <option value="">Seleccionar categoría</option>
-                    <option value="bebidas">☕ Bebidas</option>
-                    <option value="panaderia">🥖 Panadería</option>
-                    <option value="reposteria">🍰 Repostería</option>
-                    <option value="salado">🥪 Salado</option>
-                    <option value="dulces">🍪 Dulces</option>
-                    <option value="otros">📦 Otros</option>
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      value={categoriaProducto}
+                      onChange={(e) => setCategoriaProducto(e.target.value)}
+                    >
+                      <option value="">Seleccionar categoría</option>
+                      {categoriasSerie.map(cat => (
+                        <option key={cat.id} value={cat.value}>{cat.emoticono} {cat.nombre}</option>
+                      ))}
+                      {categoriasGestion.map(cat => (
+                        <option key={cat.id} value={cat.nombre}>{cat.emoticono} {cat.nombre}</option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setModalGestionCategorias(true)}
+                      title="Gestionar categorías"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Código SKU */}
@@ -6323,7 +7709,10 @@ export function ClientesGerente() {
                   <Input 
                     placeholder="Autogenerado si vacío"
                     className="w-full"
+                    value={skuProducto}
+                    onChange={(e) => setSkuProducto(e.target.value)}
                   />
+                  <p className="text-xs text-gray-500 mt-1">Si lo dejas vacío, se generará automáticamente</p>
                 </div>
 
                 {/* Imagen del producto */}
@@ -6338,24 +7727,176 @@ export function ClientesGerente() {
                   </div>
                 </div>
 
-                {/* Descripción */}
+                {/* Descripción Corta */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Descripción
+                    Descripción Corta *
                   </label>
                   <textarea 
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                    rows={3}
-                    placeholder="Descripción breve del producto..."
+                    rows={2}
+                    placeholder="Descripción breve que aparecerá en listados (máx. 100 caracteres)"
+                    maxLength={100}
+                    value={descripcionCorta}
+                    onChange={(e) => setDescripcionCorta(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">{descripcionCorta.length}/100 caracteres</p>
+                </div>
+
+                {/* Descripción Larga */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Descripción Larga
+                  </label>
+                  <textarea 
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    rows={4}
+                    placeholder="Descripción detallada que aparecerá en la ficha del producto (ingredientes, alérgenos, etc.)"
+                    value={descripcionLarga}
+                    onChange={(e) => setDescripcionLarga(e.target.value)}
                   />
                 </div>
 
-                {/* Disponible para venta online */}
+                {/* Alérgenos */}
                 <div className="md:col-span-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" className="rounded" />
-                    <span className="text-sm text-gray-700">Disponible para pedidos online</span>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Alérgenos
                   </label>
+                  
+                  {/* Input para añadir alérgeno */}
+                  <div className="flex gap-2 mb-3">
+                    <Input
+                      placeholder="Ej: Gluten, Lácteos, Huevo..."
+                      value={nuevoAlergeno}
+                      onChange={(e) => setNuevoAlergeno(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && nuevoAlergeno.trim()) {
+                          e.preventDefault();
+                          setAlergenosSeleccionados([...alergenosSeleccionados, {nombre: nuevoAlergeno.trim(), color: colorAlergeno}]);
+                          setNuevoAlergeno('');
+                        }
+                      }}
+                      className="flex-1"
+                    />
+                    <input
+                      type="color"
+                      value={colorAlergeno}
+                      onChange={(e) => setColorAlergeno(e.target.value)}
+                      className="w-12 h-10 rounded border border-gray-300 cursor-pointer"
+                      title="Color del alérgeno"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        if (nuevoAlergeno.trim()) {
+                          setAlergenosSeleccionados([...alergenosSeleccionados, {nombre: nuevoAlergeno.trim(), color: colorAlergeno}]);
+                          setNuevoAlergeno('');
+                        }
+                      }}
+                      className="bg-[#ED1C24] hover:bg-[#d01920]"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Añadir
+                    </Button>
+                  </div>
+
+                  {/* Lista de alérgenos añadidos */}
+                  {alergenosSeleccionados.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg border">
+                      {alergenosSeleccionados.map((alergeno, idx) => (
+                        <Badge
+                          key={idx}
+                          style={{backgroundColor: alergeno.color, color: '#fff'}}
+                          className="flex items-center gap-1 pr-1"
+                        >
+                          {alergeno.nombre}
+                          <button
+                            type="button"
+                            onClick={() => setAlergenosSeleccionados(alergenosSeleccionados.filter((_, i) => i !== idx))}
+                            className="ml-1 hover:bg-black/20 rounded-full p-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <p className="text-xs text-gray-500 mt-2">
+                    Escribe el nombre del alérgeno, selecciona un color y pulsa "Añadir" o Enter. Esta información es obligatoria por ley.
+                  </p>
+                </div>
+
+                {/* Etiquetas */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Etiquetas
+                  </label>
+                  
+                  {/* Input para añadir etiqueta */}
+                  <div className="flex gap-2 mb-3">
+                    <Input
+                      placeholder="Ej: Artesanal, Premium, Vegano..."
+                      value={nuevaEtiqueta}
+                      onChange={(e) => setNuevaEtiqueta(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && nuevaEtiqueta.trim()) {
+                          e.preventDefault();
+                          setEtiquetasSeleccionadas([...etiquetasSeleccionadas, {nombre: nuevaEtiqueta.trim(), color: colorEtiqueta}]);
+                          setNuevaEtiqueta('');
+                        }
+                      }}
+                      className="flex-1"
+                    />
+                    <input
+                      type="color"
+                      value={colorEtiqueta}
+                      onChange={(e) => setColorEtiqueta(e.target.value)}
+                      className="w-12 h-10 rounded border border-gray-300 cursor-pointer"
+                      title="Color de la etiqueta"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        if (nuevaEtiqueta.trim()) {
+                          setEtiquetasSeleccionadas([...etiquetasSeleccionadas, {nombre: nuevaEtiqueta.trim(), color: colorEtiqueta}]);
+                          setNuevaEtiqueta('');
+                        }
+                      }}
+                      className="bg-[#ED1C24] hover:bg-[#d01920]"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Añadir
+                    </Button>
+                  </div>
+
+                  {/* Lista de etiquetas añadidas */}
+                  {etiquetasSeleccionadas.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg border">
+                      {etiquetasSeleccionadas.map((etiqueta, idx) => (
+                        <Badge
+                          key={idx}
+                          style={{backgroundColor: etiqueta.color, color: '#fff'}}
+                          className="flex items-center gap-1 pr-1"
+                        >
+                          {etiqueta.nombre}
+                          <button
+                            type="button"
+                            onClick={() => setEtiquetasSeleccionadas(etiquetasSeleccionadas.filter((_, i) => i !== idx))}
+                            className="ml-1 hover:bg-black/20 rounded-full p-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <p className="text-xs text-gray-500 mt-2">
+                    Las etiquetas ayudan a categorizar y destacar productos especiales.
+                  </p>
                 </div>
               </div>
             </div>
@@ -6379,66 +7920,168 @@ export function ClientesGerente() {
 
               {tipoProducto === 'manufacturado' && (
                 <>
-                  {/* Lista de ingredientes */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Ingrediente</th>
-                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Cantidad</th>
-                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Unidad</th>
-                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Coste/ud</th>
-                          <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Total</th>
-                          <th className="w-16"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="border-t">
-                          <td className="py-3 px-4">
-                            <select className="w-full border rounded px-2 py-1 text-sm">
-                              <option>Harina (Kg)</option>
-                              <option>Mantequilla (Kg)</option>
-                              <option>Azúcar (Kg)</option>
-                              <option>Huevos (Unidad)</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-4">
-                            <Input type="number" className="w-full text-center" placeholder="0.5" step="0.01" />
-                          </td>
-                          <td className="py-3 px-4 text-center text-sm text-gray-600">Kg</td>
-                          <td className="py-3 px-4 text-center text-sm text-gray-600">€2.50</td>
-                          <td className="py-3 px-4 text-center text-sm font-semibold text-gray-900">€1.25</td>
-                          <td className="py-3 px-4 text-center">
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700">
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  {/* Lista de ingredientes seleccionados */}
+                  {ingredientesSeleccionados.length > 0 && (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Ingrediente</th>
+                            <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Cantidad</th>
+                            <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Unidad</th>
+                            <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Coste/ud</th>
+                            <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Total</th>
+                            <th className="w-16"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ingredientesSeleccionados.map((ing, idx) => {
+                            const articulo = articulosStock.find(a => a.id === ing.id);
+                            return (
+                              <tr key={idx} className="border-t">
+                                <td className="py-3 px-4">
+                                  <div className="text-sm font-medium text-gray-900">{ing.nombre}</div>
+                                  {articulo && (
+                                    <div className="text-xs text-gray-500">
+                                      Stock: {articulo.stock} {articulo.unidad}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Input 
+                                    type="number" 
+                                    className="w-full text-center" 
+                                    placeholder="0.5" 
+                                    step="0.01"
+                                    min="0"
+                                    value={ing.cantidad || ''}
+                                    onChange={(e) => {
+                                      const cantidad = parseFloat(e.target.value) || 0;
+                                      setIngredientesSeleccionados(prev => 
+                                        prev.map((item, i) => i === idx ? { ...item, cantidad } : item)
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td className="py-3 px-4 text-center text-sm text-gray-600 capitalize">
+                                  {articulo?.unidad || '-'}
+                                </td>
+                                <td className="py-3 px-4 text-center text-sm text-gray-600">
+                                  €{ing.precio.toFixed(2)}
+                                </td>
+                                <td className="py-3 px-4 text-center text-sm font-semibold text-gray-900">
+                                  €{(ing.precio * ing.cantidad).toFixed(2)}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="text-red-600 hover:text-red-700"
+                                    onClick={() => {
+                                      setIngredientesSeleccionados(prev => prev.filter((_, i) => i !== idx));
+                                      toast.success('Ingrediente eliminado');
+                                    }}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Selector de ingrediente nuevo */}
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Añadir Ingrediente
+                    </label>
+                    <div className="flex gap-3">
+                      <select 
+                        className="flex-1 border rounded px-3 py-2 text-sm"
+                        value={busquedaArticulo}
+                        onChange={(e) => setBusquedaArticulo(e.target.value)}
+                      >
+                        <option value="">Seleccionar artículo de stock...</option>
+                        {articulosStock
+                          .filter(art => !ingredientesSeleccionados.some(ing => ing.id === art.id))
+                          .map(art => (
+                            <option key={art.id} value={art.id}>
+                              {art.nombre} ({art.unidad}) - €{art.precioCoste.toFixed(2)}/{art.unidad}
+                            </option>
+                          ))
+                        }
+                      </select>
+                      <Button
+                        variant="default"
+                        className="bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                        disabled={!busquedaArticulo}
+                        onClick={() => {
+                          if (!busquedaArticulo) return;
+                          
+                          const articulo = articulosStock.find(a => a.id === busquedaArticulo);
+                          if (!articulo) return;
+
+                          // Verificar si ya existe
+                          if (ingredientesSeleccionados.some(ing => ing.id === articulo.id)) {
+                            toast.error('Este ingrediente ya está añadido');
+                            return;
+                          }
+
+                          // Añadir ingrediente
+                          setIngredientesSeleccionados(prev => [...prev, {
+                            id: articulo.id,
+                            nombre: articulo.nombre,
+                            precio: articulo.precioCoste, // ✅ Último coste de compra
+                            cantidad: 0
+                          }]);
+
+                          setBusquedaArticulo('');
+                          toast.success(`✅ ${articulo.nombre} añadido al escandallo`);
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Añadir
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      💡 El coste/ud es el <strong>último precio de compra</strong> registrado del artículo
+                    </p>
                   </div>
 
-                  {/* Botón añadir ingrediente */}
-                  <Button variant="outline" className="w-full">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Añadir Ingrediente
-                  </Button>
+                  {ingredientesSeleccionados.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                      <p className="text-sm">No hay ingredientes en el escandallo</p>
+                      <p className="text-xs text-gray-400 mt-1">Selecciona artículos de stock para crear la receta</p>
+                    </div>
+                  )}
 
                   {/* Resumen de costes */}
-                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Coste materias primas:</span>
-                      <span className="font-semibold text-gray-900">€1.25</span>
+                  {ingredientesSeleccionados.length > 0 && (
+                    <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Coste materias primas:</span>
+                        <span className="font-semibold text-gray-900">
+                          €{ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Merma estimada (10%):</span>
+                        <span className="font-semibold text-gray-900">
+                          €{(ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0) * 0.10).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="border-t pt-2 flex justify-between">
+                        <span className="font-semibold text-gray-900">Coste total por unidad:</span>
+                        <span className="font-semibold text-teal-600">
+                          €{(ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0) * 1.10).toFixed(2)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Merma estimada (10%):</span>
-                      <span className="font-semibold text-gray-900">€0.13</span>
-                    </div>
-                    <div className="border-t pt-2 flex justify-between">
-                      <span className="font-semibold text-gray-900">Coste total por unidad:</span>
-                      <span className="font-semibold text-teal-600">€1.38</span>
-                    </div>
-                  </div>
+                  )}
                 </>
               )}
 
@@ -6490,19 +8133,20 @@ export function ClientesGerente() {
             </div>
           )}
 
-          {/* Paso 4: Precios y Stock */}
+          {/* Paso 4: Precios Base y Stock */}
           {pasoActual === 4 && (
             <div className="space-y-4">
               <div className="text-center mb-6">
-                <h3 className="font-semibold text-gray-900 mb-2">Configuración de Precios y Stock</h3>
-                <p className="text-sm text-gray-600">Define los precios de venta y stock inicial</p>
+                <h3 className="font-semibold text-gray-900 mb-2">Configuración de Precios Base y Stock</h3>
+                <p className="text-sm text-gray-600">Define el precio base y disponibilidad del producto</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Precio de coste */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                     Precio de coste
+                    <Info className="w-4 h-4 text-gray-400" title="Precio de coste unitario del producto" />
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
@@ -6511,19 +8155,42 @@ export function ClientesGerente() {
                       step="0.01"
                       className="pl-7"
                       placeholder="0.00"
-                      value={tipoProducto === 'manufacturado' ? '1.38' : ''}
-                      disabled={tipoProducto === 'manufacturado'}
+                      value={tipoProducto === 'manufacturado' || tipoProducto === 'combo' 
+                        ? (precioCosteAuto || 0).toFixed(2)
+                        : precioCosteManual !== null ? precioCosteManual.toFixed(2) : ''
+                      }
+                      onChange={(e) => {
+                        const valor = parseFloat(e.target.value);
+                        if (!isNaN(valor)) {
+                          setPrecioCosteManual(valor);
+                          setPrecioCoste(valor);
+                        }
+                      }}
+                      disabled={tipoProducto === 'manufacturado' || tipoProducto === 'combo'}
                     />
                   </div>
-                  {tipoProducto === 'manufacturado' && (
-                    <p className="text-xs text-gray-500 mt-1">Calculado del escandallo</p>
+                  {(tipoProducto === 'manufacturado' || tipoProducto === 'combo') && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      ✓ Calculado automáticamente del {tipoProducto === 'manufacturado' ? 'escandallo' : 'combo'}
+                    </p>
+                  )}
+                  {tipoProducto === 'simple' && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs text-blue-700 flex items-start gap-2">
+                        <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>
+                          <strong>Último coste registrado:</strong> €2.35 (Factura #FAC-2024-1523 del 15/12/2024 - Proveedor: Distribuciones XYZ)
+                        </span>
+                      </p>
+                    </div>
                   )}
                 </div>
 
                 {/* Margen deseado */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                     Margen deseado
+                    <Info className="w-4 h-4 text-gray-400" title="Margen de beneficio objetivo sobre el coste" />
                   </label>
                   <div className="relative">
                     <Input 
@@ -6531,6 +8198,11 @@ export function ClientesGerente() {
                       step="1"
                       className="pr-7"
                       placeholder="60"
+                      value={margenDeseado}
+                      onChange={(e) => {
+                        const valor = parseInt(e.target.value);
+                        if (!isNaN(valor)) setMargenDeseado(valor);
+                      }}
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">%</span>
                   </div>
@@ -6538,8 +8210,9 @@ export function ClientesGerente() {
 
                 {/* PVP Calculado */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                     PVP Calculado
+                    <Info className="w-4 h-4 text-gray-400" title="Precio calculado automáticamente según coste y margen" />
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
@@ -6547,16 +8220,18 @@ export function ClientesGerente() {
                       type="number" 
                       step="0.01"
                       className="pl-7 bg-gray-50"
-                      value="3.45"
+                      value={pvpCalculado.toFixed(2)}
                       disabled
                     />
                   </div>
+                  <p className="text-xs text-gray-500 mt-1">Automático según coste + margen</p>
                 </div>
 
                 {/* PVP Final (Manual) */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    PVP Final (Manual)
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                    PVP Final (opcional)
+                    <Info className="w-4 h-4 text-gray-400" title="Sobrescribe el PVP calculado si necesitas un precio específico" />
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
@@ -6564,9 +8239,15 @@ export function ClientesGerente() {
                       type="number" 
                       step="0.01"
                       className="pl-7"
-                      placeholder="3.50"
+                      placeholder={pvpCalculado.toFixed(2)}
+                      value={pvpManual !== null ? pvpManual.toFixed(2) : ''}
+                      onChange={(e) => {
+                        const valor = parseFloat(e.target.value);
+                        setPvpManual(!isNaN(valor) ? valor : null);
+                      }}
                     />
                   </div>
+                  <p className="text-xs text-gray-500 mt-1">Déjalo vacío para usar el calculado</p>
                 </div>
 
                 {/* IVA */}
@@ -6574,57 +8255,514 @@ export function ClientesGerente() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     IVA
                   </label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
-                    <option value="21">21% (General)</option>
-                    <option value="10">10% (Reducido)</option>
-                    <option value="4">4% (Superreducido)</option>
-                    <option value="0">0% (Exento)</option>
+                  <select 
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500" 
+                    value={ivaSeleccionado} 
+                    onChange={(e) => setIvaSeleccionado(e.target.value)}
+                  >
+                    {ivasConfigurados.map(iva => (
+                      <option key={iva.id} value={iva.porcentaje}>
+                        {iva.porcentaje}% ({iva.nombre})
+                        {recargoEquivalenciaActivo && ` + ${iva.recargo}% RE`}
+                      </option>
+                    ))}
                   </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    <Info className="w-3 h-3 inline mr-1" />
+                    Configura los IVAs en <strong>Configuración → Sistema → Fiscalidad</strong>
+                  </p>
                 </div>
 
-                {/* Stock inicial */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Stock inicial
-                  </label>
-                  <Input 
-                    type="number" 
-                    step="1"
-                    placeholder="0"
-                  />
-                </div>
-
-                {/* Punto de venta por defecto */}
+                {/* 💰 SECCIÓN: Precios por Marca y Canal de Venta */}
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Punto de venta por defecto
+                  <label className="block text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    💰 Precios y Disponibilidad por Marca/Canal
+                    <Info className="w-4 h-4 text-gray-400" title="Define precios diferenciados según la marca y canal de venta (App, TPV, Glovo, etc.)" />
                   </label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
-                    <option value="">Todos los PDV</option>
-                    <option value="norte">PDV Norte</option>
-                    <option value="centro">PDV Centro</option>
-                    <option value="sur">PDV Sur</option>
-                  </select>
+                  
+                  <div className="border rounded-lg p-4 bg-gradient-to-br from-purple-50 to-pink-50">
+                    {/* Lista de precios configurados */}
+                    {preciosPorContexto.length > 0 ? (
+                      <div className="space-y-2 mb-3">
+                        {preciosPorContexto.map((precio, idx) => (
+                          <div key={idx} className="flex items-center gap-3 bg-white p-3 rounded-lg border">
+                            <Tag className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{precio.marcaNombre}</div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline" className="text-xs bg-blue-50 border-blue-200 text-blue-700">
+                                  📱 {precio.canalNombre}
+                                </Badge>
+                                {precio.pdvNombre && (
+                                  <Badge variant="outline" className="text-xs bg-gray-50 border-gray-200">
+                                    <Store className="w-3 h-3 mr-1" />
+                                    {precio.pdvNombre}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="w-24 text-center"
+                                value={precio.precioVenta}
+                                onChange={(e) => {
+                                  const precioVenta = parseFloat(e.target.value) || 0;
+                                  setPreciosPorContexto(prev => prev.map((p, i) => 
+                                    i === idx ? { ...p, precioVenta } : p
+                                  ));
+                                }}
+                              />
+                              <span className="text-sm text-gray-500">€</span>
+                              <label className="flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={precio.disponible}
+                                  onChange={(e) => {
+                                    setPreciosPorContexto(prev => prev.map((p, i) => 
+                                      i === idx ? { ...p, disponible: e.target.checked } : p
+                                    ));
+                                  }}
+                                  className="rounded"
+                                />
+                                <span className="text-xs text-gray-600">Activo</span>
+                              </label>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setPreciosPorContexto(prev => prev.filter((_, i) => i !== idx));
+                                toast.success('Precio eliminado');
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-gray-500 mb-3">
+                        <DollarSign className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                        <p className="text-sm">No hay precios configurados</p>
+                        <p className="text-xs text-gray-400 mt-1">Define en qué marcas y canales estará disponible el producto y su precio</p>
+                      </div>
+                    )}
+
+                    {/* Botón para añadir precio */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-purple-300 hover:bg-purple-50"
+                      onClick={() => setModalPreciosPorContexto(true)}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Añadir Precio por Marca/Canal
+                    </Button>
+
+                    <p className="text-xs text-purple-700 mt-3 flex items-start gap-1 bg-purple-100 p-2 rounded">
+                      <Sparkles className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                      <span>El mismo producto puede tener <strong>precios diferentes</strong> en Modomio vs BlackBurger, o en App vs Glovo. Configura cada combinación según tu estrategia comercial.</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* 📦 SECCIÓN: Stock Físico por PDV */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    📦 Stock Físico por Punto de Venta
+                    <Info className="w-4 h-4 text-gray-400" title="Stock físico compartido entre todas las marcas. Define stock actual y mínimo para alertas de reposición" />
+                  </label>
+                  
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    {/* Lista de stocks configurados */}
+                    {stockPorPDV.length > 0 ? (
+                      <div className="space-y-2 mb-3">
+                        {stockPorPDV.map((stock, idx) => (
+                          <div key={idx} className="flex items-start gap-3 bg-white p-3 rounded-lg border">
+                            <Store className="w-4 h-4 text-blue-600 flex-shrink-0 mt-1" />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{stock.pdvNombre}</div>
+                              <div className="text-xs text-gray-500">{stock.empresaNombre}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-center">
+                                <Input
+                                  type="number"
+                                  step="1"
+                                  min="0"
+                                  className="w-20 text-center text-xs"
+                                  value={stock.stockActual}
+                                  onChange={(e) => {
+                                    const stockActual = parseInt(e.target.value) || 0;
+                                    setStockPorPDV(prev => prev.map((s, i) => 
+                                      i === idx ? { ...s, stockActual } : s
+                                    ));
+                                  }}
+                                />
+                                <span className="text-xs text-gray-500 block mt-1">Actual</span>
+                              </div>
+                              <div className="text-center">
+                                <Input
+                                  type="number"
+                                  step="1"
+                                  min="0"
+                                  className="w-20 text-center text-xs"
+                                  value={stock.stockMinimo}
+                                  onChange={(e) => {
+                                    const stockMinimo = parseInt(e.target.value) || 0;
+                                    setStockPorPDV(prev => prev.map((s, i) => 
+                                      i === idx ? { ...s, stockMinimo } : s
+                                    ));
+                                  }}
+                                />
+                                <span className="text-xs text-gray-500 block mt-1">Mínimo</span>
+                              </div>
+                              {stock.stockActual < stock.stockMinimo && (
+                                <Badge variant="destructive" className="text-xs">
+                                  ⚠️ Bajo stock
+                                </Badge>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setStockPorPDV(prev => prev.filter((_, i) => i !== idx));
+                                toast.success('Stock eliminado');
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-gray-500 mb-3">
+                        <Package className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                        <p className="text-sm">No hay stock configurado</p>
+                        <p className="text-xs text-gray-400 mt-1">Añade los PDV para gestionar el stock físico del producto</p>
+                      </div>
+                    )}
+
+                    {/* Botón para añadir stock */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setModalStockPorPDV(true)}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Añadir Stock en PDV
+                    </Button>
+
+                    <p className="text-xs text-gray-600 mt-3 flex items-start gap-1">
+                      <Package className="w-3 h-3 text-blue-500 flex-shrink-0 mt-0.5" />
+                      Stock físico compartido entre todas las marcas del PDV. Para precios diferenciados, usa la sección superior
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              {/* Resumen visual */}
+              {/* Resumen visual con cálculos reales */}
               <div className="bg-gradient-to-br from-teal-50 to-blue-50 rounded-lg p-6 border border-teal-200">
-                <div className="text-center space-y-2">
-                  <p className="text-sm text-gray-600">Margen final</p>
-                  <p className="text-3xl font-bold text-teal-600">61.5%</p>
-                  <p className="text-xs text-gray-500">Beneficio: €2.12 por unidad</p>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Coste Unitario</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      €{(precioCosteManual ?? precioCosteAuto ?? precioCoste).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">PVP Final</p>
+                    <p className="text-2xl font-bold text-teal-600">
+                      €{(pvpManual ?? pvpCalculado).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Margen Real</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {(() => {
+                        const coste = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+                        const pvp = pvpManual ?? pvpCalculado;
+                        const margenReal = coste > 0 ? ((pvp - coste) / pvp * 100) : 0;
+                        return margenReal.toFixed(1);
+                      })()}%
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-teal-300 text-center">
+                  <p className="text-sm text-gray-700">
+                    Beneficio por unidad: <strong className="text-teal-700">
+                      €{(() => {
+                        const coste = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+                        const pvp = pvpManual ?? pvpCalculado;
+                        return (pvp - coste).toFixed(2);
+                      })()}
+                    </strong>
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Paso 5: Resumen */}
+          {/* Paso 5: Precios por Submarca y Canal - SISTEMA DINÁMICO EDITABLE */}
           {pasoActual === 5 && (
             <div className="space-y-4">
               <div className="text-center mb-6">
+                <h3 className="font-semibold text-gray-900 mb-2">Precios por Submarca y Canal de Venta</h3>
+                <p className="text-sm text-gray-600">
+                  Configura precios diferenciados eligiendo las submarcas y canales de venta específicos
+                </p>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm text-blue-800 font-medium mb-1">
+                      Arquitectura Multicanal Real
+                    </p>
+                    <p className="text-xs text-blue-700 mb-2">
+                      <strong>GERENTE → EMPRESA → MARCA → SUBMARCA → CANAL</strong>
+                    </p>
+                    {empresaProducto ? (
+                      <p className="text-xs text-blue-700 bg-white rounded px-2 py-1 mb-2">
+                        <Building className="w-3 h-3 inline mr-1" />
+                        Producto asociado a: <strong>{empresaProducto === 'hoy-pecamos' ? 'HoyPecamos' : 'Otra Empresa'}</strong>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2">
+                        ⚠️ No has seleccionado una empresa. Ve al Paso 2 para seleccionarla.
+                      </p>
+                    )}
+                    <p className="text-xs text-blue-700">
+                      Añade cada combinación de <strong>submarca + canal</strong> que necesites. Por ejemplo: "Modomio + App/Web", "BlackBurger + PDV", etc. 
+                      Esto te permite tener precios distintos para cada submarca y canal, adaptándote a comisiones y estrategias comerciales.
+                    </p>
+                    <p className="text-xs text-blue-700 mt-2">
+                      <strong>Canales disponibles:</strong> App/Web (aplicación y web) y PDV (punto de venta físico)
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla de precios por submarca/canal */}
+              {preciosPorSubmarcaCanal.length > 0 ? (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Submarca</th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Canal de Venta</th>
+                        <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">PVP (€)</th>
+                        <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Margen</th>
+                        <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Comisión</th>
+                        <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">Beneficio</th>
+                        <th className="text-center py-3 px-4 text-sm font-medium text-gray-700"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preciosPorSubmarcaCanal.map((item) => {
+                        const coste = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+                        const pvpBase = pvpManual ?? pvpCalculado;
+                        const pvpActual = item.pvp || pvpBase;
+                        // App/Web y PDV no tienen comisiones externas (0%)
+                        const comision = item.canal === 'App/Web' ? 0 : 
+                                       item.canal === 'PDV' ? 0 : 0;
+                        const importeComision = pvpActual * comision;
+                        const beneficioNeto = pvpActual - coste - importeComision;
+                        const margenReal = coste > 0 ? ((pvpActual - coste) / pvpActual * 100) : 0;
+                        const margenNeto = coste > 0 ? (beneficioNeto / pvpActual * 100) : 0;
+
+                        return (
+                          <tr key={item.id} className="border-t hover:bg-gray-50">
+                            <td className="py-3 px-4 text-sm">
+                              <select
+                                className="border rounded px-2 py-1 text-sm w-full"
+                                value={item.submarca}
+                                onChange={(e) => {
+                                  setPreciosPorSubmarcaCanal(prev => 
+                                    prev.map(p => p.id === item.id ? { ...p, submarca: e.target.value } : p)
+                                  );
+                                }}
+                              >
+                                {submarcasDisponibles.map(sm => (
+                                  <option key={sm} value={sm}>{sm}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-3 px-4 text-sm">
+                              <select
+                                className="border rounded px-2 py-1 text-sm w-full"
+                                value={item.canal}
+                                onChange={(e) => {
+                                  setPreciosPorSubmarcaCanal(prev => 
+                                    prev.map(p => p.id === item.id ? { ...p, canal: e.target.value } : p)
+                                  );
+                                }}
+                              >
+                                {canalesDisponibles.map(cn => (
+                                  <option key={cn} value={cn}>
+                                    {cn === 'PDV' && '🏪 '}
+                                    {cn === 'App/Web' && '📱 '}
+                                    {cn}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">€</span>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  className="w-24 text-center pl-5"
+                                  placeholder={pvpBase.toFixed(2)}
+                                  value={item.pvp || ''}
+                                  onChange={(e) => {
+                                    const nuevoPrecio = parseFloat(e.target.value);
+                                    setPreciosPorSubmarcaCanal(prev => 
+                                      prev.map(p => p.id === item.id ? { ...p, pvp: !isNaN(nuevoPrecio) ? nuevoPrecio : 0 } : p)
+                                    );
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`text-sm font-medium ${margenReal >= 50 ? 'text-green-600' : margenReal >= 30 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                {margenReal.toFixed(1)}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="text-xs text-gray-600">
+                                {(comision * 100).toFixed(0)}%<br/>
+                                (€{importeComision.toFixed(2)})
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`text-sm font-semibold ${beneficioNeto > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                €{beneficioNeto.toFixed(2)}
+                                <br/>
+                                <span className="text-xs">({margenNeto.toFixed(1)}%)</span>
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setPreciosPorSubmarcaCanal(prev => prev.filter(p => p.id !== item.id));
+                                  toast.success('Combinación eliminada');
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed rounded-lg p-8 text-center text-gray-500">
+                  <Globe className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p className="text-sm font-medium mb-1">No hay precios configurados aún</p>
+                  <p className="text-xs text-gray-400">Añade combinaciones de submarca + canal usando el botón de abajo</p>
+                </div>
+              )}
+
+              {/* Botón para añadir nueva combinación */}
+              <Button
+                className="w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                onClick={() => {
+                  const nuevoPrecio = {
+                    id: `precio-${Date.now()}`,
+                    submarca: submarcasDisponibles[0],
+                    canal: canalesDisponibles[0],
+                    pvp: pvpManual ?? pvpCalculado,
+                    margen: 0
+                  };
+                  setPreciosPorSubmarcaCanal(prev => [...prev, nuevoPrecio]);
+                  toast.success('Nueva combinación añadida');
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Añadir Submarca + Canal
+              </Button>
+
+              {preciosPorSubmarcaCanal.length > 0 && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        // Copiar precio base a todos
+                        const pvpBase = pvpManual ?? pvpCalculado;
+                        setPreciosPorSubmarcaCanal(prev => prev.map(item => ({
+                          ...item,
+                          pvp: pvpBase
+                        })));
+                        toast.success('Precio base aplicado a todos');
+                      }}
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Aplicar precio base a todos
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        // Auto-ajustar según comisión (App/Web y PDV no tienen comisión externa)
+                        const pvpBase = pvpManual ?? pvpCalculado;
+                        setPreciosPorSubmarcaCanal(prev => prev.map(item => {
+                          let ajuste = 1;
+                          // App/Web y PDV no tienen comisiones externas, mantienen precio base
+                          if (item.canal === 'App/Web') ajuste = 1.0;
+                          if (item.canal === 'PDV') ajuste = 1.0;
+                          return {
+                            ...item,
+                            pvp: Math.round(pvpBase * ajuste * 100) / 100
+                          };
+                        }));
+                        toast.success('Precios aplicados sin comisiones externas');
+                      }}
+                    >
+                      <Calculator className="w-4 h-4 mr-2" />
+                      Auto-ajustar por comisión
+                    </Button>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm text-amber-800 font-medium mb-1">
+                          Recomendación de Pricing
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          Los agregadores cobran comisiones del 25-35%. Incrementa los precios en canales externos 
+                          para mantener los mismos márgenes de beneficio que en TPV presencial.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Paso 6: Resumen */}
+          {pasoActual === 6 && (
+            <div className="space-y-4">
+              <div className="text-center mb-6">
                 <h3 className="font-semibold text-gray-900 mb-2">Resumen del Producto</h3>
-                <p className="text-sm text-gray-600">Revisa la información antes de crear el producto</p>
+                <p className="text-sm text-gray-600">Revisa toda la información antes de {modoEdicionProducto ? 'guardar los cambios' : 'crear el producto'}</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -6642,15 +8780,25 @@ export function ClientesGerente() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Nombre:</span>
-                        <span className="font-medium text-gray-900">Café con leche</span>
+                        <span className="font-medium text-gray-900">{nombreProducto || 'Sin nombre'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Empresa:</span>
+                        <span className="font-medium text-blue-600">
+                          {empresaProducto === 'hoy-pecamos' ? '🏢 HoyPecamos' : empresaProducto === 'otra-empresa' ? '🏢 Otra Empresa' : '⚠️ Sin asignar'}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Categoría:</span>
-                        <span className="font-medium text-gray-900">Bebidas</span>
+                        <span className="font-medium text-gray-900 capitalize">{categoriaProducto || 'Sin categoría'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">SKU:</span>
-                        <span className="font-medium text-gray-900 font-mono">PRD-AUTO-001</span>
+                        <span className="font-medium text-gray-900 font-mono">{skuProducto || 'PRD-AUTO-' + Date.now().toString().slice(-6)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Descripción:</span>
+                        <span className="font-medium text-gray-900 text-right text-xs">{descripcionCorta ? descripcionCorta.substring(0, 40) + '...' : 'Sin descripción'}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -6666,44 +8814,92 @@ export function ClientesGerente() {
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Coste:</span>
-                        <span className="font-medium text-gray-900">€1.38</span>
+                        <span className="font-medium text-gray-900">€{(precioCosteManual ?? precioCosteAuto ?? precioCoste).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">PVP:</span>
-                        <span className="font-medium text-gray-900">€3.50</span>
+                        <span className="text-gray-600">PVP Base:</span>
+                        <span className="font-medium text-gray-900">€{(pvpManual ?? pvpCalculado).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">IVA:</span>
-                        <span className="font-medium text-gray-900">21%</span>
+                        <span className="font-medium text-gray-900">{ivaSeleccionado}%</span>
                       </div>
                       <div className="flex justify-between border-t pt-2">
                         <span className="text-gray-600">Margen:</span>
-                        <span className="font-semibold text-teal-600">61.5%</span>
+                        <span className="font-semibold text-teal-600">
+                          {(() => {
+                            const coste = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+                            const pvp = pvpManual ?? pvpCalculado;
+                            const margen = coste > 0 ? ((pvp - coste) / pvp * 100) : 0;
+                            return margen.toFixed(1);
+                          })()}%
+                        </span>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Stock */}
+                {/* Stock Físico */}
                 <Card>
                   <CardContent className="p-4">
                     <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                       <Package className="w-4 h-4 text-teal-600" />
-                      Stock y Disponibilidad
+                      Stock Físico por PDV
                     </h4>
                     <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Stock inicial:</span>
-                        <span className="font-medium text-gray-900">50 unidades</span>
+                      <div className="flex justify-between items-start">
+                        <span className="text-gray-600">Stock configurado:</span>
+                        <div className="text-right">
+                          {stockPorPDV.length > 0 ? (
+                            stockPorPDV.map((s, idx) => (
+                              <div key={idx} className="text-xs font-medium text-gray-900 mb-2 border-l-2 border-blue-500 pl-2">
+                                <div className="text-blue-600">{s.pdvNombre}</div>
+                                <div className="flex items-center gap-2 text-gray-600 mt-1">
+                                  <span>Actual: {s.stockActual}</span>
+                                  <span>|</span>
+                                  <span>Mín: {s.stockMinimo}</span>
+                                </div>
+                                {s.stockActual < s.stockMinimo && (
+                                  <div className="text-red-600 text-xs mt-1">⚠️ Bajo stock</div>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-xs text-gray-400">No configurado</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">PDV:</span>
-                        <span className="font-medium text-gray-900">Todos</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Online:</span>
-                        <span className="font-medium text-green-600">Sí</span>
-                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Precios por Marca/Canal */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-purple-600" />
+                      Precios por Marca/Canal
+                    </h4>
+                    <div className="space-y-2 text-sm">
+                      {preciosPorContexto.length > 0 ? (
+                        preciosPorContexto.map((p, idx) => (
+                          <div key={idx} className="text-xs font-medium text-gray-900 mb-2 border-l-2 border-purple-500 pl-2">
+                            <div className="text-purple-600">{p.marcaNombre}</div>
+                            <div className="flex items-center gap-2 text-gray-600 mt-1">
+                              <span>📱 {p.canalNombre}</span>
+                              {p.pdvNombre && <span className="text-xs">• {p.pdvNombre}</span>}
+                            </div>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-green-600 font-semibold">{p.precioVenta.toFixed(2)}€</span>
+                              <span className={`text-xs ${p.disponible ? 'text-green-600' : 'text-red-600'}`}>
+                                {p.disponible ? '✅ Activo' : '❌ Inactivo'}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400">No configurado</span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -6719,20 +8915,115 @@ export function ClientesGerente() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-600">Ingredientes:</span>
-                          <span className="font-medium text-gray-900">1 item</span>
+                          <span className="font-medium text-gray-900">{ingredientesSeleccionados.length} items</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">Coste materias:</span>
-                          <span className="font-medium text-gray-900">€1.25</span>
+                          <span className="font-medium text-gray-900">
+                            €{ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0).toFixed(2)}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">Merma (10%):</span>
-                          <span className="font-medium text-gray-900">€0.13</span>
+                          <span className="font-medium text-gray-900">
+                            €{(ingredientesSeleccionados.reduce((sum, ing) => sum + (ing.precio * ing.cantidad), 0) * 0.10).toFixed(2)}
+                          </span>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
                 )}
+
+                {/* Alérgenos */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-orange-600" />
+                      Alérgenos
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {alergenosSeleccionados.length > 0 ? (
+                        alergenosSeleccionados.map((alergeno, idx) => (
+                          <Badge
+                            key={idx}
+                            style={{backgroundColor: alergeno.color, color: '#fff'}}
+                            className="text-xs"
+                          >
+                            {alergeno.nombre}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400">Sin alérgenos declarados</span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Etiquetas */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-purple-600" />
+                      Etiquetas
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {etiquetasSeleccionadas.length > 0 ? (
+                        etiquetasSeleccionadas.map((etiqueta, idx) => (
+                          <Badge
+                            key={idx}
+                            style={{backgroundColor: etiqueta.color, color: '#fff'}}
+                            className="text-xs"
+                          >
+                            {etiqueta.nombre}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400">Sin etiquetas</span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Precios por Canal - Resumen */}
+                <Card className="md:col-span-2">
+                  <CardContent className="p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-teal-600" />
+                      Precios por Submarca y Canal
+                    </h4>
+                    {preciosPorSubmarcaCanal.length > 0 ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                        {preciosPorSubmarcaCanal.map((item) => {
+                          const pvpBase = pvpManual ?? pvpCalculado;
+                          const pvpFinal = item.pvp || pvpBase;
+                          return (
+                            <div key={item.id} className="border rounded p-3 bg-gray-50">
+                              <div className="font-medium text-gray-900 text-xs mb-1">
+                                {item.submarca}
+                              </div>
+                              <div className="text-xs text-gray-600 mb-1">
+                                {item.canal === 'TPV' && '🏪 '}
+                                {item.canal === 'Glovo' && '🛵 '}
+                                {item.canal === 'Uber Eats' && '🚗 '}
+                                {item.canal === 'Delivery' && '📦 '}
+                                {item.canal === 'App/Web' && '📱 '}
+                                {item.canal}
+                              </div>
+                              <div className="text-teal-600 font-bold text-lg">
+                                €{pvpFinal.toFixed(2)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-gray-500">
+                        <p className="text-sm">No hay precios multicanal configurados</p>
+                        <p className="text-xs text-gray-400 mt-1">El producto usará el precio base de €{(pvpManual ?? pvpCalculado).toFixed(2)}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
 
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -6766,34 +9057,1648 @@ export function ClientesGerente() {
             </Button>
 
             <div className="text-sm text-gray-500">
-              Paso {pasoActual} de 5
+              Paso {pasoActual} de 6
             </div>
 
             <Button
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
               onClick={() => {
-                if (pasoActual === 5) {
+                if (pasoActual === 6) {
                   // 🔌 EVENTO: PRODUCTO_CREADO
+                  const coste = precioCosteManual ?? precioCosteAuto ?? precioCoste;
+                  const pvp = pvpManual ?? pvpCalculado;
+                  const margen = coste > 0 ? ((pvp - coste) / pvp * 100) : 0;
+                  
                   console.log('📤 EVENTO: PRODUCTO_CREADO', {
                     tipo: tipoProducto,
-                    nombre: 'Café con leche',
-                    categoria: 'Bebidas',
-                    coste: 1.38,
-                    pvp: 3.50,
-                    margen: 61.5,
+                    nombre: nombreProducto,
+                    empresa: empresaProducto,
+                    categoria: categoriaProducto,
+                    descripcionCorta,
+                    descripcionLarga,
+                    alergenos: alergenosSeleccionados,
+                    etiquetas: etiquetasSeleccionadas,
+                    sku: skuProducto,
+                    coste: coste.toFixed(2),
+                    pvp: pvp.toFixed(2),
+                    margen: margen.toFixed(1),
+                    iva: ivaSeleccionado,
+                    stockInicial,
+                    disponibleOnline,
+                    pdvs: pdvsSeleccionados,
+                    preciosPorCanal: preciosPorSubmarcaCanal,
+                    ingredientes: ingredientesSeleccionados,
                     timestamp: new Date()
                   });
-                  toast.success('✅ Producto creado correctamente');
+                  if (modoEdicionProducto) {
+                    toast.success('✅ Producto actualizado correctamente');
+                  } else {
+                    toast.success('✅ Producto creado correctamente');
+                  }
                   setModalNuevoProducto(false);
                   setPasoActual(1);
+                  // Reset estados
+                  setNombreProducto('');
+                  setEmpresaProducto('');
+                  setCategoriaProducto('');
+                  setDescripcionCorta('');
+                  setDescripcionLarga('');
+                  setAlergenosSeleccionados([]);
+                  setEtiquetasSeleccionadas([]);
+                  setSkuProducto('');
+                  setPrecioCosteManual(null);
+                  setPvpManual(null);
+                  setStockInicial(0);
                 } else {
                   setPasoActual(pasoActual + 1);
                 }
               }}
             >
-              {pasoActual === 5 ? 'Crear Producto' : 'Siguiente'}
+              {pasoActual === 6 ? (modoEdicionProducto ? 'Guardar Cambios' : 'Crear Producto') : 'Siguiente'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Nueva Categoría */}
+      <Dialog open={modalNuevaCategoria} onOpenChange={setModalNuevaCategoria}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="w-5 h-5 text-teal-600" />
+              Nueva Categoría
+            </DialogTitle>
+            <DialogDescription>
+              Crea una nueva categoría personalizada para tus productos
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nombre de la categoría *
+              </label>
+              <Input
+                placeholder="Ej: Bebidas Energéticas, Snacks, etc."
+                value={categoriaPersonalizada}
+                onChange={(e) => setCategoriaPersonalizada(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && categoriaPersonalizada.trim()) {
+                    setCategoriasPersonalizadas([...categoriasPersonalizadas, categoriaPersonalizada.trim()]);
+                    setCategoriaProducto(categoriaPersonalizada.trim());
+                    setCategoriaPersonalizada('');
+                    setModalNuevaCategoria(false);
+                    toast.success('✅ Categoría creada correctamente');
+                  }
+                }}
+              />
+            </div>
+
+            {categoriasPersonalizadas.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Categorías personalizadas existentes:
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {categoriasPersonalizadas.map((cat, idx) => (
+                    <div key={idx} className="flex items-center gap-1 bg-teal-50 border border-teal-200 rounded-full px-3 py-1 text-sm">
+                      <span className="text-teal-700">{cat}</span>
+                      <button
+                        onClick={() => {
+                          setCategoriasPersonalizadas(categoriasPersonalizadas.filter((_, i) => i !== idx));
+                          toast.info('Categoría eliminada');
+                        }}
+                        className="text-teal-600 hover:text-teal-800"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCategoriaPersonalizada('');
+                setModalNuevaCategoria(false);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+              onClick={() => {
+                if (categoriaPersonalizada.trim()) {
+                  setCategoriasPersonalizadas([...categoriasPersonalizadas, categoriaPersonalizada.trim()]);
+                  setCategoriaProducto(categoriaPersonalizada.trim());
+                  setCategoriaPersonalizada('');
+                  setModalNuevaCategoria(false);
+                  toast.success('✅ Categoría creada correctamente');
+                } else {
+                  toast.error('Por favor ingresa un nombre para la categoría');
+                }
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Crear Categoría
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Gestión Completa de Categorías */}
+      <Dialog open={modalGestionCategorias} onOpenChange={setModalGestionCategorias}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="w-5 h-5 text-teal-600" />
+              Gestión de Categorías
+            </DialogTitle>
+            <DialogDescription>
+              Crea, edita y elimina categorías personalizadas para tus productos
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Formulario de nueva categoría */}
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <h4 className="font-semibold text-gray-900 mb-3">
+                {categoriaEditando ? '✏️ Editar Categoría' : '➕ Nueva Categoría'}
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="sm:col-span-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Emoticono
+                  </label>
+                  <Input
+                    placeholder="🍽️"
+                    value={categoriaEmoticon}
+                    onChange={(e) => setCategoriaEmoticon(e.target.value)}
+                    className="text-2xl text-center"
+                    maxLength={2}
+                  />
+                  <p className="text-xs text-gray-500 mt-1 text-center">Ej: 🍕🍔🥤</p>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nombre de la categoría *
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Ej: Pizzas, Hamburguesas, etc."
+                      value={categoriaNombre}
+                      onChange={(e) => setCategoriaNombre(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && categoriaNombre.trim()) {
+                          if (categoriaEditando) {
+                            // Editar
+                            if (categoriaEditando.tipo === 'serie') {
+                              setCategoriasSerie(prev => prev.map(cat => 
+                                cat.id === categoriaEditando.id 
+                                  ? { ...cat, emoticono: categoriaEmoticon, nombre: categoriaNombre.trim() }
+                                  : cat
+                              ));
+                            } else {
+                              setCategoriasGestion(prev => prev.map(cat => 
+                                cat.id === categoriaEditando.id 
+                                  ? { ...cat, emoticono: categoriaEmoticon, nombre: categoriaNombre.trim() }
+                                  : cat
+                              ));
+                            }
+                            toast.success('✅ Categoría actualizada');
+                            setCategoriaEditando(null);
+                          } else {
+                            // Crear nueva
+                            setCategoriasGestion(prev => [...prev, {
+                              id: `cat-${Date.now()}`,
+                              emoticono: categoriaEmoticon,
+                              nombre: categoriaNombre.trim()
+                            }]);
+                            toast.success('✅ Categoría creada');
+                          }
+                          setCategoriaEmoticon('🍽️');
+                          setCategoriaNombre('');
+                        }
+                      }}
+                    />
+                    {categoriaEditando ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCategoriaEditando(null);
+                          setCategoriaEmoticon('🍽️');
+                          setCategoriaNombre('');
+                        }}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    ) : (
+                      <Button
+                        className="bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                        size="sm"
+                        onClick={() => {
+                          if (categoriaNombre.trim()) {
+                            setCategoriasGestion(prev => [...prev, {
+                              id: `cat-${Date.now()}`,
+                              emoticono: categoriaEmoticon,
+                              nombre: categoriaNombre.trim()
+                            }]);
+                            toast.success('✅ Categoría creada');
+                            setCategoriaEmoticon('🍽️');
+                            setCategoriaNombre('');
+                          } else {
+                            toast.error('Por favor ingresa un nombre');
+                          }
+                        }}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {categoriaEditando && (
+                <Button
+                  className="mt-3 w-full bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                  onClick={() => {
+                    if (categoriaNombre.trim() && categoriaEditando) {
+                      if (categoriaEditando.tipo === 'serie') {
+                        setCategoriasSerie(prev => prev.map(cat => 
+                          cat.id === categoriaEditando.id 
+                            ? { ...cat, emoticono: categoriaEmoticon, nombre: categoriaNombre.trim() }
+                            : cat
+                        ));
+                      } else {
+                        setCategoriasGestion(prev => prev.map(cat => 
+                          cat.id === categoriaEditando.id 
+                            ? { ...cat, emoticono: categoriaEmoticon, nombre: categoriaNombre.trim() }
+                            : cat
+                        ));
+                      }
+                      toast.success('✅ Categoría actualizada');
+                      setCategoriaEditando(null);
+                      setCategoriaEmoticon('🍽️');
+                      setCategoriaNombre('');
+                    }
+                  }}
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Guardar Cambios
+                </Button>
+              )}
+            </div>
+
+            {/* Lista de categorías de serie */}
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-3">
+                📋 Categorías del Sistema ({categoriasSerie.length})
+              </h4>
+              <div className="space-y-2">
+                {categoriasSerie.map((cat) => (
+                  <div key={cat.id} className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3 hover:border-blue-400 transition-colors">
+                    <span className="text-2xl">{cat.emoticono}</span>
+                    <span className="flex-1 font-medium text-gray-900">{cat.nombre}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCategoriaEditando({...cat, tipo: 'serie'});
+                        setCategoriaEmoticon(cat.emoticono);
+                        setCategoriaNombre(cat.nombre);
+                      }}
+                    >
+                      <Edit className="w-4 h-4 text-blue-600" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Lista de categorías personalizadas */}
+            {categoriasGestion.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-3">
+                  ⭐ Categorías Personalizadas ({categoriasGestion.length})
+                </h4>
+                <div className="space-y-2">
+                  {categoriasGestion.map((cat) => (
+                    <div key={cat.id} className="flex items-center gap-3 bg-white border rounded-lg p-3 hover:border-teal-300 transition-colors">
+                      <span className="text-2xl">{cat.emoticono}</span>
+                      <span className="flex-1 font-medium text-gray-900">{cat.nombre}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setCategoriaEditando({...cat, tipo: 'personalizada'});
+                          setCategoriaEmoticon(cat.emoticono);
+                          setCategoriaNombre(cat.nombre);
+                        }}
+                      >
+                        <Edit className="w-4 h-4 text-blue-600" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setCategoriasGestion(prev => prev.filter(c => c.id !== cat.id));
+                          toast.success('Categoría eliminada');
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {categoriasGestion.length === 0 && (
+              <div className="text-center py-6 text-gray-500 border-t">
+                <p className="text-sm">No tienes categorías personalizadas</p>
+                <p className="text-xs text-gray-400 mt-1">Crea categorías adicionales con emoticono arriba</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setModalGestionCategorias(false);
+                setCategoriaEditando(null);
+                setCategoriaEmoticon('🍽️');
+                setCategoriaNombre('');
+              }}
+            >
+              Cerrar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Añadir Stock Físico por PDV */}
+      <Dialog open={modalStockPorPDV} onOpenChange={setModalStockPorPDV}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="w-5 h-5 text-blue-600" />
+              📦 Configurar Stock Físico por PDV
+            </DialogTitle>
+            <DialogDescription>
+              Define el stock físico del producto en cada punto de venta (compartido entre todas las marcas)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            {/* Filtro de Contexto Jerárquico - Solo PDV, sin marca */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Selecciona Punto(s) de Venta *
+              </label>
+              <div className="border-2 border-blue-200 rounded-lg overflow-hidden">
+                <FiltroContextoJerarquico
+                  selectedContext={contextosStockTemp}
+                  onChange={setContextosStockTemp}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                💡 El stock es físico y compartido entre todas las marcas del PDV
+              </p>
+            </div>
+
+            {/* Configuración solo si hay contextos seleccionados */}
+            {contextosStockTemp.length > 0 && (
+              <>
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-3">
+                    Configuración para {contextosStockTemp.length} PDV(s):
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Stock Actual */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Package className="w-4 h-4 inline mr-1" />
+                        Stock Actual *
+                      </label>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder="Ej: 25"
+                        value={stockActualTemp || ''}
+                        onChange={(e) => setStockActualTemp(parseInt(e.target.value) || 0)}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Unidades disponibles ahora
+                      </p>
+                    </div>
+
+                    {/* Stock Mínimo */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <AlertCircle className="w-4 h-4 inline mr-1" />
+                        Stock Mínimo *
+                      </label>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder="Ej: 10"
+                        value={stockMinimoTemp || ''}
+                        onChange={(e) => setStockMinimoTemp(parseInt(e.target.value) || 0)}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Alerta si baja de este nivel
+                      </p>
+                    </div>
+
+                    {/* Stock Máximo */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Box className="w-4 h-4 inline mr-1" />
+                        Stock Máximo (opcional)
+                      </label>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder="Ej: 50"
+                        value={stockMaximoTemp || ''}
+                        onChange={(e) => setStockMaximoTemp(parseInt(e.target.value) || null)}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Para reposición automática
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vista previa de configuraciones */}
+                <div className="bg-gray-50 rounded-lg p-4 border">
+                  <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">
+                    Vista previa - Se aplicará a:
+                  </p>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {contextosStockTemp.map((ctx, idx) => {
+                      const pdv = pdvsDisponiblesLocal.find(p => p.id === ctx.punto_venta_id);
+                      return (
+                        <div key={idx} className="flex items-center gap-2 text-sm bg-white px-3 py-2 rounded border">
+                          <Store className="w-4 h-4 text-blue-400" />
+                          <span className="font-medium">{pdv?.nombre || 'PDV'}</span>
+                          {stockActualTemp > 0 && (
+                            <div className="ml-auto flex items-center gap-2 text-xs">
+                              <Badge variant="outline" className="bg-blue-50 border-blue-200">
+                                Actual: {stockActualTemp}
+                              </Badge>
+                              <Badge variant="outline" className="bg-amber-50 border-amber-200">
+                                Mín: {stockMinimoTemp}
+                              </Badge>
+                              {stockMaximoTemp && (
+                                <Badge variant="outline" className="bg-green-50 border-green-200">
+                                  Máx: {stockMaximoTemp}
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Información */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="text-xs text-blue-700">
+                  <p className="font-medium mb-1">📦 Stock físico compartido:</p>
+                  <ul className="list-disc list-inside space-y-1 mt-2">
+                    <li>El stock es <strong>físico y único por PDV</strong>, compartido entre todas las marcas</li>
+                    <li>Si tienes 10 Coca-Colas en "Centro", son las mismas para Modomio y BlackBurger</li>
+                    <li>Para precios diferenciados por marca/canal, ve a la sección "Precios por Marca/Canal"</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setModalStockPorPDV(false);
+                setContextosStockTemp([]);
+                setStockActualTemp(0);
+                setStockMinimoTemp(0);
+                setStockMaximoTemp(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700"
+              disabled={contextosStockTemp.length === 0 || stockActualTemp < 0 || stockMinimoTemp <= 0}
+              onClick={() => {
+                if (contextosStockTemp.length === 0) {
+                  toast.error('Selecciona al menos un PDV');
+                  return;
+                }
+
+                if (stockMinimoTemp <= 0) {
+                  toast.error('Indica el stock mínimo');
+                  return;
+                }
+
+                let añadidos = 0;
+                let duplicados = 0;
+                const nuevosStocks: typeof stockPorPDV = [];
+
+                // Procesar cada contexto seleccionado
+                contextosStockTemp.forEach(ctx => {
+                  // Verificar si ya existe (solo por PDV, sin marca)
+                  const yaExiste = stockPorPDV.some(
+                    s => s.empresaId === ctx.empresa_id && 
+                         s.pdvId === ctx.punto_venta_id
+                  );
+
+                  if (yaExiste) {
+                    duplicados++;
+                    return;
+                  }
+
+                  // Obtener nombres desde empresaConfig
+                  const empresa = empresasDisponiblesLocal.find(e => e.id === ctx.empresa_id);
+                  const pdv = pdvsDisponiblesLocal.find(p => p.id === ctx.punto_venta_id);
+
+                  // Crear configuración
+                  nuevosStocks.push({
+                    empresaId: ctx.empresa_id,
+                    empresaNombre: empresa?.nombreComercial || ctx.empresa_id,
+                    pdvId: ctx.punto_venta_id || '',
+                    pdvNombre: pdv?.nombre || ctx.punto_venta_id || '',
+                    stockActual: stockActualTemp,
+                    stockMinimo: stockMinimoTemp,
+                    stockMaximo: stockMaximoTemp || undefined
+                  });
+
+                  añadidos++;
+                });
+
+                // ⭐ ACTUALIZACIÓN ÚNICA con todos los nuevos stocks
+                if (nuevosStocks.length > 0) {
+                  setStockPorPDV(prev => [...prev, ...nuevosStocks]);
+                }
+
+                // Mensajes de resultado
+                if (añadidos > 0) {
+                  toast.success(`✅ ${añadidos} stock${añadidos > 1 ? 's' : ''} añadido${añadidos > 1 ? 's' : ''}`);
+                }
+                if (duplicados > 0) {
+                  toast.warning(`⚠️ ${duplicados} ya existía${duplicados > 1 ? 'n' : ''}`);
+                }
+
+                // Resetear y cerrar
+                setModalStockPorPDV(false);
+                setContextosStockTemp([]);
+                setStockActualTemp(0);
+                setStockMinimoTemp(0);
+                setStockMaximoTemp(null);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Añadir Stock {contextosStockTemp.length > 0 ? `(${contextosStockTemp.length})` : ''}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 💰 NUEVO MODAL: Añadir Precio por Marca/Canal */}
+      <Dialog open={modalPreciosPorContexto} onOpenChange={setModalPreciosPorContexto}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="w-5 h-5 text-purple-600" />
+              💰 Configurar Precio por Marca y Canal
+            </DialogTitle>
+            <DialogDescription>
+              Define en qué marcas y canales estará disponible el producto y su precio específico
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            {/* Filtro de Contexto Jerárquico - Con marca */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Selecciona Marca(s) y PDV(s) *
+              </label>
+              <div className="border-2 border-purple-200 rounded-lg overflow-hidden">
+                <FiltroContextoJerarquico
+                  selectedContext={contextosPrecioTemp}
+                  onChange={setContextosPrecioTemp}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                💡 Selecciona las marcas donde quieres vender este producto
+              </p>
+            </div>
+
+            {/* Configuración solo si hay contextos seleccionados */}
+            {contextosPrecioTemp.length > 0 && (
+              <>
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-3">
+                    Configuración para {contextosPrecioTemp.length} contexto(s):
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Canal de Venta */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        📱 Canal de Venta *
+                      </label>
+                      <Select value={canalPrecioTemp} onValueChange={setCanalPrecioTemp}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona canal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="app">📱 App/Web</SelectItem>
+                          <SelectItem value="tpv">🏪 TPV (Tienda física)</SelectItem>
+                          <SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
+                          <SelectItem value="glovo">🛵 Glovo</SelectItem>
+                          <SelectItem value="uber_eats">🍔 Uber Eats</SelectItem>
+                          <SelectItem value="just_eat">🍕 Just Eat</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Cada canal puede tener precio diferente
+                      </p>
+                    </div>
+
+                    {/* Precio de Venta */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Euro className="w-4 h-4 inline mr-1" />
+                        Precio de Venta *
+                      </label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Ej: 10.00"
+                        value={precioVentaTemp || ''}
+                        onChange={(e) => setPrecioVentaTemp(parseFloat(e.target.value) || null)}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Precio para este contexto
+                      </p>
+                    </div>
+
+                    {/* Disponible */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Estado
+                      </label>
+                      <div className="flex items-center h-10 px-3 border rounded-md bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={disponibleTemp}
+                          onChange={(e) => setDisponibleTemp(e.target.checked)}
+                          className="rounded mr-2"
+                        />
+                        <span className="text-sm text-gray-700">
+                          {disponibleTemp ? '✅ Disponible' : '❌ No disponible'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Activo en este canal
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vista previa de configuraciones */}
+                <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                  <p className="text-xs font-medium text-purple-600 mb-2 uppercase tracking-wide">
+                    Vista previa - Se aplicará a:
+                  </p>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {contextosPrecioTemp.map((ctx, idx) => {
+                      const marca = marcasDisponiblesLocal.find(m => m.id === ctx.marca_id);
+                      const submarca = ctx.submarca_id ? Object.values(SUBMARCAS).find(s => s.id === ctx.submarca_id) : null;
+                      const pdv = pdvsDisponiblesLocal.find(p => p.id === ctx.punto_venta_id);
+                      const canalNombre = canalPrecioTemp === 'app' ? 'App/Web' : 
+                                         canalPrecioTemp === 'tpv' ? 'TPV' :
+                                         canalPrecioTemp === 'whatsapp' ? 'WhatsApp' :
+                                         canalPrecioTemp === 'glovo' ? 'Glovo' :
+                                         canalPrecioTemp === 'uber_eats' ? 'Uber Eats' :
+                                         canalPrecioTemp === 'just_eat' ? 'Just Eat' : 'Sin canal';
+                      
+                      // Mostrar submarca si existe, sino marca
+                      const displayName = submarca ? `${submarca.icono} ${submarca.nombre}` : (marca?.nombre || 'Marca');
+                      
+                      return (
+                        <div key={idx} className="flex items-center gap-2 text-sm bg-white px-3 py-2 rounded border">
+                          <Tag className="w-4 h-4 text-purple-400" />
+                          <span className="font-medium">{displayName}</span>
+                          {canalPrecioTemp && (
+                            <>
+                              <ArrowRight className="w-3 h-3 text-gray-400" />
+                              <span className="text-purple-600">{canalNombre}</span>
+                            </>
+                          )}
+                          {pdv && (
+                            <>
+                              <ArrowRight className="w-3 h-3 text-gray-400" />
+                              <span className="text-gray-500 text-xs">{pdv.nombre}</span>
+                            </>
+                          )}
+                          {precioVentaTemp && (
+                            <div className="ml-auto flex items-center gap-2 text-xs">
+                              <Badge variant="outline" className="bg-green-50 border-green-200">
+                                {precioVentaTemp.toFixed(2)}€
+                              </Badge>
+                              <Badge variant={disponibleTemp ? "default" : "destructive"} className="text-xs">
+                                {disponibleTemp ? '✅' : '❌'}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Información */}
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <Sparkles className="w-4 h-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                <div className="text-xs text-purple-700">
+                  <p className="font-medium mb-1">💡 Precios diferenciados por contexto:</p>
+                  <ul className="list-disc list-inside space-y-1 mt-2">
+                    <li>El mismo producto puede tener <strong>precios diferentes</strong> en cada marca</li>
+                    <li>Cada canal de venta (App, Glovo, etc.) puede tener su propio precio</li>
+                    <li>Ejemplo: Coca-Cola en Modomio App: 2€, en Glovo: 3€, en BlackBurger TPV: 2.50€</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setModalPreciosPorContexto(false);
+                setContextosPrecioTemp([]);
+                setCanalPrecioTemp('');
+                setPrecioVentaTemp(null);
+                setDisponibleTemp(true);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={contextosPrecioTemp.length === 0 || !canalPrecioTemp || !precioVentaTemp}
+              onClick={() => {
+                if (contextosPrecioTemp.length === 0) {
+                  toast.error('Selecciona al menos una marca');
+                  return;
+                }
+
+                if (!canalPrecioTemp) {
+                  toast.error('Selecciona un canal de venta');
+                  return;
+                }
+
+                if (!precioVentaTemp) {
+                  toast.error('Indica el precio de venta');
+                  return;
+                }
+
+                let añadidos = 0;
+                let duplicados = 0;
+                const nuevosPrecios: typeof preciosPorContexto = [];
+
+                // Nombres de canales
+                const nombreCanal = canalPrecioTemp === 'app' ? 'App/Web' : 
+                                   canalPrecioTemp === 'tpv' ? 'TPV' :
+                                   canalPrecioTemp === 'whatsapp' ? 'WhatsApp' :
+                                   canalPrecioTemp === 'glovo' ? 'Glovo' :
+                                   canalPrecioTemp === 'uber_eats' ? 'Uber Eats' :
+                                   canalPrecioTemp === 'just_eat' ? 'Just Eat' : canalPrecioTemp;
+
+                // Procesar cada contexto seleccionado
+                contextosPrecioTemp.forEach(ctx => {
+                  // Verificar si ya existe
+                  const yaExiste = preciosPorContexto.some(
+                    p => p.empresaId === ctx.empresa_id && 
+                         p.marcaId === ctx.marca_id && 
+                         p.pdvId === ctx.punto_venta_id &&
+                         p.canal === canalPrecioTemp
+                  );
+
+                  if (yaExiste) {
+                    duplicados++;
+                    return;
+                  }
+
+                  // Obtener nombres desde empresaConfig
+                  const empresa = empresasDisponiblesLocal.find(e => e.id === ctx.empresa_id);
+                  const marca = marcasDisponiblesLocal.find(m => m.id === ctx.marca_id);
+                  const submarca = ctx.submarca_id ? Object.values(SUBMARCAS).find(s => s.id === ctx.submarca_id) : null;
+                  const pdv = pdvsDisponiblesLocal.find(p => p.id === ctx.punto_venta_id);
+
+                  // Usar nombre de submarca si existe, sino marca
+                  const nombreDisplay = submarca ? submarca.nombre : (marca?.nombre || ctx.marca_id || '');
+
+                  // Crear configuración
+                  nuevosPrecios.push({
+                    empresaId: ctx.empresa_id,
+                    empresaNombre: empresa?.nombreComercial || ctx.empresa_id,
+                    marcaId: ctx.marca_id || '',
+                    marcaNombre: nombreDisplay,
+                    submarcaId: ctx.submarca_id || '',
+                    pdvId: ctx.punto_venta_id || '',
+                    pdvNombre: pdv?.nombre || '',
+                    canal: canalPrecioTemp,
+                    canalNombre: nombreCanal,
+                    precioVenta: precioVentaTemp,
+                    disponible: disponibleTemp
+                  });
+
+                  añadidos++;
+                });
+
+                // ⭐ ACTUALIZACIÓN ÚNICA con todos los nuevos precios
+                if (nuevosPrecios.length > 0) {
+                  setPreciosPorContexto(prev => [...prev, ...nuevosPrecios]);
+                }
+
+                // Mensajes de resultado
+                if (añadidos > 0) {
+                  toast.success(`✅ ${añadidos} precio${añadidos > 1 ? 's' : ''} añadido${añadidos > 1 ? 's' : ''}`);
+                }
+                if (duplicados > 0) {
+                  toast.warning(`⚠️ ${duplicados} ya existía${duplicados > 1 ? 'n' : ''}`);
+                }
+
+                // Resetear y cerrar
+                setModalPreciosPorContexto(false);
+                setContextosPrecioTemp([]);
+                setCanalPrecioTemp('');
+                setPrecioVentaTemp(null);
+                setDisponibleTemp(true);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Añadir Precio {contextosPrecioTemp.length > 0 ? `(${contextosPrecioTemp.length})` : ''}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Importar Productos */}
+      <Dialog open={modalImportarProductos} onOpenChange={(open) => {
+        setModalImportarProductos(open);
+        if (!open) {
+          // Reset estados
+          setArchivoImportacion(null);
+          setDatosPreview([]);
+          setErrorImportacion('');
+          setPasoImportacion('subir');
+          setProductosImportados(0);
+          setImportando(false);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <Upload className="w-5 h-5 text-teal-600" />
+              Importación de Productos
+            </DialogTitle>
+            <DialogDescription>
+              Importa datos masivos desde archivos CSV o Excel para poblar rápidamente tu sistema
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Importar Productos */}
+      <Dialog open={modalImportarProductos} onOpenChange={(open) => {
+        setModalImportarProductos(open);
+        if (!open) {
+          // Reset estados
+          setArchivoImportacion(null);
+          setDatosPreview([]);
+          setErrorImportacion('');
+          setPasoImportacion('subir');
+          setProductosImportados(0);
+          setImportando(false);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <Upload className="w-5 h-5 text-teal-600" />
+              Importación de Productos
+            </DialogTitle>
+            <DialogDescription>
+              Importa datos masivos desde archivos CSV o Excel para poblar rápidamente tu sistema
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Paso 1: Subir Archivo */}
+            {pasoImportacion === 'subir' && (
+              <>
+                {/* Advertencia importante */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-amber-900 mb-1">Importante antes de importar</h4>
+                      <ul className="text-sm text-amber-800 space-y-1 list-disc list-inside">
+                        <li>Asegúrate de que tus archivos siguen el formato correcto.</li>
+                        <li>Descarga las plantillas de ejemplo antes de importar tus datos.</li>
+                        <li>Los campos marcados con * son obligatorios.</li>
+                        <li>Revisa el preview antes de confirmar la importación.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botón para descargar plantilla */}
+                <div className="space-y-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const headers = [
+                        'id_producto*',
+                        'nombre*',
+                        'descripcion_corta',
+                        'descripcion_larga',
+                        'categoria*',
+                        'subcategoria',
+                        'pvp_base*',
+                        'iva*',
+                        'escandallo_unitario*',
+                        'alergenos',
+                        'etiquetas',
+                        'vida_util_horas',
+                        'submarcas*',
+                        'precios_submarca',
+                        'activo_global',
+                        'visible_tpv',
+                        'visible_app',
+                        'imagen_url'
+                      ];
+                      const ejemplos = [
+                        'PRD-001',
+                        'Croissant Mantequilla',
+                        'Delicioso croissant francés',
+                        'Croissant elaborado con mantequilla francesa de primera calidad',
+                        'Bollería',
+                        'Pastelería Francesa',
+                        '2.50',
+                        '10',
+                        '0.85',
+                        'gluten,lactosa',
+                        'premium,artesanal',
+                        '48',
+                        'modomio,blackburger',
+                        '2.50,2.50',
+                        'true',
+                        'true',
+                        'true',
+                        'https://example.com/croissant.jpg'
+                      ];
+                      const csvContent = [
+                        headers.join(','),
+                        ejemplos.join(',')
+                      ].join('\n');
+                      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                      const link = document.createElement('a');
+                      link.href = URL.createObjectURL(blob);
+                      link.download = 'plantilla_productos_udar.csv';
+                      link.click();
+                      toast.success('Plantilla descargada correctamente');
+                    }}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Descargar Plantilla CSV
+                  </Button>
+
+                  <div className="text-xs text-gray-600 bg-white rounded p-3 border">
+                    <p className="font-semibold mb-2">Campos obligatorios (*):</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <p>• id_producto: Código único (PRD-XXX)</p>
+                      <p>• nombre: Nombre del producto</p>
+                      <p>• categoria: Bollería, Bebidas, etc.</p>
+                      <p>• pvp_base: Precio venta público</p>
+                      <p>• iva: Porcentaje IVA (10, 21...)</p>
+                      <p>• escandallo_unitario: Coste unitario</p>
+                      <p>• submarcas: modomio,blackburger</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Zona de subida de archivo */}
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-teal-500 transition-colors bg-gray-50">
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setArchivoImportacion(file);
+                        setErrorImportacion('');
+                        // Simular lectura del archivo (en producción, usar una librería como Papa Parse o XLSX)
+                        toast.success(`Archivo "${file.name}" cargado correctamente`);
+                      }
+                    }}
+                    className="hidden"
+                    id="file-upload"
+                  />
+                  <label htmlFor="file-upload" className="cursor-pointer">
+                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-base font-medium text-gray-700 mb-1">
+                      {archivoImportacion ? archivoImportacion.name : 'Selecciona o arrastra un archivo'}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      Formatos soportados: CSV, XLSX, XLS (máx. 10MB)
+                    </p>
+                  </label>
+                </div>
+
+                {/* Error de importación */}
+                {errorImportacion && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-red-900 mb-1">Error en el archivo</h4>
+                      <p className="text-sm text-red-800">{errorImportacion}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Botones */}
+                <div className="flex justify-between items-center pt-4 border-t">
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setModalImportarProductos(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!archivoImportacion) {
+                        toast.error('Selecciona un archivo para continuar');
+                        return;
+                      }
+                      // Simular validación y preview
+                      setDatosPreview([
+                        { id_producto: 'PRD-001', nombre: 'Croissant Mantequilla', pvp_base: 2.50, submarcas: 'modomio,blackburger', estado: 'válido' },
+                        { id_producto: 'PRD-002', nombre: 'Café Espresso', pvp_base: 1.50, submarcas: 'modomio', estado: 'válido' },
+                        { id_producto: 'PRD-003', nombre: 'Pan Integral', pvp_base: 3.50, submarcas: 'blackburger', estado: 'válido' }
+                      ]);
+                      setPasoImportacion('preview');
+                    }}
+                    disabled={!archivoImportacion}
+                    className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                  >
+                    Validar y Previsualizar
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Paso 2: Preview de Datos */}
+            {pasoImportacion === 'preview' && (
+              <>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex gap-3">
+                    <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-blue-900 mb-1">Vista previa de los datos</h4>
+                      <p className="text-sm text-blue-800">
+                        Revisa los datos antes de importar. Se importarán <span className="font-semibold">{datosPreview.length} productos</span>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de preview */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto max-h-96">
+                    <table className="w-full">
+                      <thead className="bg-gray-100 border-b sticky top-0">
+                        <tr>
+                          <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Estado</th>
+                          <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">ID Producto</th>
+                          <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Nombre</th>
+                          <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">PVP</th>
+                          <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Submarcas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {datosPreview.map((producto, index) => (
+                          <tr key={index} className="border-b hover:bg-gray-50">
+                            <td className="py-3 px-4">
+                              <Badge className={producto.estado === 'válido' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
+                                {producto.estado === 'válido' ? (
+                                  <>
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Válido
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertTriangle className="w-3 h-3 mr-1" />
+                                    Error
+                                  </>
+                                )}
+                              </Badge>
+                            </td>
+                            <td className="py-3 px-4 font-mono text-sm">{producto.id_producto}</td>
+                            <td className="py-3 px-4 font-medium">{producto.nombre}</td>
+                            <td className="py-3 px-4 font-semibold text-teal-600">€{producto.pvp_base}</td>
+                            <td className="py-3 px-4 text-sm text-gray-600">{producto.submarcas}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Resumen */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                    <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-green-900">{datosPreview.filter(p => p.estado === 'válido').length}</p>
+                    <p className="text-sm text-green-700">Productos válidos</p>
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                    <AlertTriangle className="w-8 h-8 text-red-600 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-red-900">{datosPreview.filter(p => p.estado === 'error').length}</p>
+                    <p className="text-sm text-red-700">Con errores</p>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                    <Package className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-blue-900">{datosPreview.length}</p>
+                    <p className="text-sm text-blue-700">Total a importar</p>
+                  </div>
+                </div>
+
+                {/* Botones */}
+                <div className="flex justify-between items-center pt-4 border-t">
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setPasoImportacion('subir')}
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Volver
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setImportando(true);
+                      // Simular importación
+                      setTimeout(() => {
+                        setProductosImportados(datosPreview.filter(p => p.estado === 'válido').length);
+                        setPasoImportacion('confirmacion');
+                        setImportando(false);
+                      }, 2000);
+                    }}
+                    disabled={importando || datosPreview.filter(p => p.estado === 'válido').length === 0}
+                    className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                  >
+                    {importando ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Importando...
+                      </>
+                    ) : (
+                      <>
+                        Confirmar Importación
+                        <Check className="w-4 h-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Paso 3: Confirmación */}
+            {pasoImportacion === 'confirmacion' && (
+              <>
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-10 h-10 text-green-600" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">¡Importación completada!</h3>
+                  <p className="text-gray-600 mb-6">
+                    Se han importado <span className="font-semibold text-teal-600">{productosImportados} productos</span> correctamente.
+                  </p>
+
+                  <div className="bg-gray-50 border rounded-lg p-6 max-w-md mx-auto">
+                    <div className="space-y-3 text-left">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Productos importados:</span>
+                        <span className="font-semibold text-gray-900">{productosImportados}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Submarcas asignadas:</span>
+                        <span className="font-semibold text-gray-900">Automático</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Estado:</span>
+                        <Badge className="bg-green-100 text-green-700">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Activos
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center pt-4 border-t">
+                  <Button
+                    onClick={() => {
+                      setModalImportarProductos(false);
+                      toast.success(`${productosImportados} productos importados correctamente`);
+                    }}
+                    className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+                  >
+                    Finalizar
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 📊 MODAL: Ver Detalles del Producto */}
+      <Dialog open={modalVerProducto} onOpenChange={setModalVerProducto}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Package className="w-6 h-6 text-teal-600" />
+                <div>
+                  <div className="text-xl font-bold text-gray-900">Croissant de Mantequilla</div>
+                  <div className="text-sm font-normal text-gray-500 mt-0.5">ID: PRD-001</div>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  // Preparar los datos del producto actual para edición
+                  const productoActual = {
+                    id: 'PRD-001',
+                    nombre: 'Croissant de Mantequilla',
+                    categoria: 'panaderia', // Debe coincidir con el value del select
+                    subcategoria: 'Bollería',
+                    descripcionCorta: 'Croissant tradicional francés elaborado con mantequilla',
+                    descripcionLarga: 'Delicioso croissant artesanal elaborado siguiendo la receta francesa tradicional. Masa hojaldrada con capas finas y crujientes, con un toque de mantequilla que le da su característico sabor y aroma.',
+                    alergenos: [
+                      {nombre: 'Gluten', color: '#f59e0b'},
+                      {nombre: 'Lácteos', color: '#06b6d4'},
+                      {nombre: 'Huevo', color: '#fbbf24'}
+                    ],
+                    etiquetas: [
+                      {nombre: 'Artesanal', color: '#f59e0b'},
+                      {nombre: 'Premium', color: '#8b5cf6'}
+                    ],
+                    tipoProducto: 'simple' as const,
+                    visibilidadTPV: true,
+                    visibilidadApp: true,
+                    // Añadir más datos según necesites
+                  };
+                  
+                  // Cargar datos en los estados del wizard
+                  setNombreProducto(productoActual.nombre);
+                  setCategoriaProducto(productoActual.categoria);
+                  setSubcategoriaProducto(productoActual.subcategoria);
+                  setDescripcionCorta(productoActual.descripcionCorta);
+                  setDescripcionLarga(productoActual.descripcionLarga);
+                  setAlergenosSeleccionados(productoActual.alergenos);
+                  setEtiquetasSeleccionadas(productoActual.etiquetas);
+                  setTipoProducto(productoActual.tipoProducto);
+                  
+                  setProductoEditando(productoActual);
+                  setModoEdicionProducto(true);
+                  setModalVerProducto(false);
+                  setModalNuevoProducto(true);
+                  setPasoActual(1);
+                  toast.success('Abriendo editor de producto');
+                }}
+                className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                Editar
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Tabs del producto */}
+          <Tabs value={tabDetallesProducto} onValueChange={setTabDetallesProducto} className="mt-4">
+            {/* Scroll horizontal sin barra en móvil */}
+            <div className="overflow-x-auto scrollbar-hide -mx-6 px-6">
+              <TabsList className="inline-flex w-auto min-w-full md:grid md:w-full md:grid-cols-4">
+                <TabsTrigger value="general" className="whitespace-nowrap">General</TabsTrigger>
+                <TabsTrigger value="precios" className="whitespace-nowrap">Precios</TabsTrigger>
+                <TabsTrigger value="analytics" className="whitespace-nowrap">
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  Analytics
+                </TabsTrigger>
+                <TabsTrigger value="historial" className="whitespace-nowrap">Historial</TabsTrigger>
+              </TabsList>
+            </div>
+
+            {/* TAB: General */}
+            <TabsContent value="general" className="space-y-6 mt-6">
+              {/* Imagen y datos básicos */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Imagen */}
+                <div className="md:col-span-1">
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="aspect-square rounded-lg overflow-hidden bg-gray-100 mb-4">
+                        <img 
+                          src="https://images.unsplash.com/photo-1568471382005-99e347e2aef0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjcm9pc3NhbnQlMjBiYWtlcnl8ZW58MXx8fHwxNzY2Nzc5MTI3fDA&ixlib=rb-4.1.0&q=80&w=1080"
+                          alt="Croissant"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Badge className="w-full justify-center bg-green-100 text-green-700">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Activo
+                        </Badge>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-600">Visible TPV:</span>
+                          <Badge variant="outline">✓ Sí</Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-600">Visible App:</span>
+                          <Badge variant="outline">✓ Sí</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Información */}
+                <div className="md:col-span-2 space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <h4 className="font-semibold text-gray-900">Información Básica</h4>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium text-gray-600">Categoría</label>
+                          <p className="text-gray-900 mt-1">Panadería</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-600">Subcategoría</label>
+                          <p className="text-gray-900 mt-1">Bollería</p>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600">Descripción corta</label>
+                        <p className="text-gray-900 mt-1">Croissant tradicional francés elaborado con mantequilla</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600">Descripción larga</label>
+                        <p className="text-gray-700 text-sm mt-1">
+                          Delicioso croissant artesanal elaborado siguiendo la receta francesa tradicional. Masa hojaladrada con 
+                          capas finas y crujientes, con un toque de mantequilla que le da su característico sabor y aroma.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600">Alérgenos</label>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <Badge style={{backgroundColor: '#f59e0b', color: '#fff'}} className="text-xs">Gluten</Badge>
+                          <Badge style={{backgroundColor: '#06b6d4', color: '#fff'}} className="text-xs">Lácteos</Badge>
+                          <Badge style={{backgroundColor: '#fbbf24', color: '#fff'}} className="text-xs">Huevo</Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600">Etiquetas</label>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <Badge style={{backgroundColor: '#f59e0b', color: '#fff'}} className="text-xs">Artesanal</Badge>
+                          <Badge style={{backgroundColor: '#8b5cf6', color: '#fff'}} className="text-xs">Premium</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+
+              {/* Métricas */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-600 mb-1">PVP Base</div>
+                    <div className="text-2xl font-bold text-teal-600">€2.50</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-600 mb-1">Coste</div>
+                    <div className="text-2xl font-bold text-gray-900">€1.20</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-600 mb-1">Margen</div>
+                    <div className="text-2xl font-bold text-green-600">52%</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-600 mb-1">Ranking</div>
+                    <div className="text-2xl font-bold text-orange-600">#1</div>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            {/* TAB: Precios */}
+            <TabsContent value="precios" className="space-y-6 mt-6">
+              <Card>
+                <CardHeader>
+                  <h4 className="font-semibold text-gray-900">Precios por Submarca y Canal</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Configura precios diferenciados según la submarca y el canal de venta
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {/* Modomio */}
+                    <div className="border rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                          🍕
+                        </div>
+                        <div>
+                          <h5 className="font-semibold text-gray-900">Modomio</h5>
+                          <p className="text-xs text-gray-500">Pizza & Italiana</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="text-xs text-gray-600">TPV/Mostrador</label>
+                          <p className="font-semibold text-gray-900 mt-1">€2.50</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">App/Web</label>
+                          <p className="font-semibold text-gray-900 mt-1">€2.50</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Uber Eats</label>
+                          <p className="font-semibold text-gray-900 mt-1">€3.00</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Glovo</label>
+                          <p className="font-semibold text-gray-900 mt-1">€3.00</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BlackBurger */}
+                    <div className="border rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                          🍔
+                        </div>
+                        <div>
+                          <h5 className="font-semibold text-gray-900">BlackBurger</h5>
+                          <p className="text-xs text-gray-500">Hamburguesas Premium</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="text-xs text-gray-600">TPV/Mostrador</label>
+                          <p className="font-semibold text-gray-900 mt-1">€3.50</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">App/Web</label>
+                          <p className="font-semibold text-gray-900 mt-1">€3.50</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Uber Eats</label>
+                          <p className="font-semibold text-gray-900 mt-1">€4.00</p>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Glovo</label>
+                          <p className="font-semibold text-gray-900 mt-1">€4.00</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* TAB: Analytics */}
+            <TabsContent value="analytics" className="mt-6">
+              <AnalyticsProducto 
+                idProducto="PRD-001" 
+                nombreProducto="Croissant de Mantequilla"
+              />
+            </TabsContent>
+
+            {/* TAB: Historial */}
+            <TabsContent value="historial" className="space-y-4 mt-6">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <h4 className="font-semibold text-gray-900">Historial de Cambios del Producto</h4>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // Aquí cargaríamos el historial del producto seleccionado
+                      cargarHistorialProducto('PRD-001');
+                    }}
+                  >
+                    <ArrowUpDown className="w-4 h-4 mr-2" />
+                    Recargar
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {cargandoHistorial ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin w-8 h-8 border-4 border-teal-600 border-t-transparent rounded-full mx-auto mb-3"></div>
+                      <p className="text-sm text-gray-500">Cargando historial...</p>
+                    </div>
+                  ) : historialProducto.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <Edit className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                      <p className="text-sm">No hay cambios registrados para este producto</p>
+                      <p className="text-xs text-gray-400 mt-1">Los cambios se registrarán automáticamente al editar</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {historialProducto.map((registro) => (
+                        <div key={registro.id} className="border-l-4 border-teal-500 bg-gray-50 rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="text-sm font-medium text-gray-900">
+                              {new Date(registro.fecha).toLocaleDateString('es-ES', { 
+                                day: '2-digit', 
+                                month: 'short', 
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                            <Badge variant="outline" className="text-xs">
+                              {registro.usuario.nombre}
+                            </Badge>
+                          </div>
+                          <div className="space-y-2">
+                            {registro.cambios.map((cambio: any, idx: number) => (
+                              <div key={idx} className="flex items-start gap-2 text-xs">
+                                <Edit className="w-3 h-3 text-blue-600 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1">
+                                  <span className="font-medium capitalize">{cambio.campo}:</span>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
+                                      {typeof cambio.valorAnterior === 'object' 
+                                        ? JSON.stringify(cambio.valorAnterior).substring(0, 50) + '...'
+                                        : cambio.valorAnterior || 'vacío'}
+                                    </code>
+                                    <span className="text-gray-400">→</span>
+                                    <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
+                                      {typeof cambio.valorNuevo === 'object'
+                                        ? JSON.stringify(cambio.valorNuevo).substring(0, 50) + '...'
+                                        : cambio.valorNuevo || 'vacío'}
+                                    </code>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>

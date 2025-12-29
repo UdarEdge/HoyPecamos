@@ -190,7 +190,7 @@ export interface CodigoClienteGoogleMaps {
   clienteEmail: string;
   
   // Código único
-  codigo: string; // "HOYPECAMOS-CLI-12345"
+  codigo: string; // "HP-A7K9M2" (formato corto: 8 caracteres)
   urlParaCompartir: string; // Texto pre-formateado para copiar
   qrCode?: string; // Base64 del QR (opcional)
   

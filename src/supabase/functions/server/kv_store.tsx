@@ -85,3 +85,13 @@ export const getByPrefix = async (prefix: string): Promise<any[]> => {
   }
   return data?.map((d) => d.value) ?? [];
 };
+
+// ⭐ NUEVA: Get keys by prefix (devuelve solo las claves, no los valores)
+export const getKeysByPrefix = async (prefix: string): Promise<string[]> => {
+  const supabase = client()
+  const { data, error } = await supabase.from("kv_store_ae2ba659").select("key").like("key", prefix + "%");
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data?.map((d) => d.key) ?? [];
+};

@@ -25,17 +25,29 @@ import {
   AlertCircle,
   Upload,
   X,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { ModalCrearAgente } from './ModalCrearAgente';
 import { guardarMarcasMultiples } from '../../utils/marcasHelper';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
 interface Marca {
   marcaNombre: string;
   marcaCodigo: string;
   colorIdentidad: string;
   logoUrl?: string; // URL o base64 del logo de la marca
+  submarcas?: Submarca[]; // ⭐ NUEVA: Submarcas de esta marca
+}
+
+// ⭐ NUEVA INTERFAZ: Submarca
+interface Submarca {
+  submarcaNombre: string;
+  submarcaCodigo: string;
+  tipoProducto: 'pizza' | 'hamburguesa' | 'bebida' | 'postre' | 'otro';
+  colorIdentidad: string;
+  logoUrl?: string;
 }
 
 interface PuntoVenta {
@@ -75,6 +87,9 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
 
   // Estado para modal de agente
   const [modalAgenteOpen, setModalAgenteOpen] = useState(false);
+  
+  // ⭐ NUEVO: Estado de carga
+  const [guardando, setGuardando] = useState(false);
 
   // Función para generar ID de empresa
   const generarEmpresaId = () => {
@@ -87,12 +102,18 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
     return `MRC-${String(index + 1).padStart(3, '0')}`;
   };
 
+  // ⭐ NUEVA: Función para generar código de submarca
+  const generarSubmarcaCodigo = (marcaIndex: number, submarcaIndex: number) => {
+    return `SUBM-${String(marcaIndex + 1).padStart(2, '0')}-${String(submarcaIndex + 1).padStart(2, '0')}`;
+  };
+
   // Añadir nueva marca
   const añadirMarca = () => {
     const nuevaMarca: Marca = {
       marcaNombre: '',
       marcaCodigo: generarMarcaCodigo(marcas.length),
       colorIdentidad: '#0d9488', // Color teal por defecto
+      submarcas: [], // ⭐ Inicializar con array vacío
     };
     setMarcas([...marcas, nuevaMarca]);
     toast.success('Marca añadida. Complete los datos.');
@@ -121,6 +142,48 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
   const actualizarMarca = (index: number, campo: keyof Marca, valor: string) => {
     const nuevasMarcas = [...marcas];
     nuevasMarcas[index] = { ...nuevasMarcas[index], [campo]: valor };
+    setMarcas(nuevasMarcas);
+  };
+
+  // ⭐ NUEVAS FUNCIONES: Gestión de Submarcas
+  
+  // Añadir submarca a una marca específica
+  const añadirSubmarca = (marcaIndex: number) => {
+    const nuevasMarcas = [...marcas];
+    const submarcas = nuevasMarcas[marcaIndex].submarcas || [];
+    
+    const nuevaSubmarca: Submarca = {
+      submarcaNombre: '',
+      submarcaCodigo: generarSubmarcaCodigo(marcaIndex, submarcas.length),
+      tipoProducto: 'otro',
+      colorIdentidad: nuevasMarcas[marcaIndex].colorIdentidad, // Heredar color de la marca
+    };
+    
+    nuevasMarcas[marcaIndex].submarcas = [...submarcas, nuevaSubmarca];
+    setMarcas(nuevasMarcas);
+    toast.success('Submarca añadida');
+  };
+
+  // Eliminar submarca
+  const eliminarSubmarca = (marcaIndex: number, submarcaIndex: number) => {
+    const nuevasMarcas = [...marcas];
+    const submarcas = nuevasMarcas[marcaIndex].submarcas || [];
+    nuevasMarcas[marcaIndex].submarcas = submarcas.filter((_, i) => i !== submarcaIndex);
+    setMarcas(nuevasMarcas);
+    toast.success('Submarca eliminada');
+  };
+
+  // Actualizar submarca
+  const actualizarSubmarca = (
+    marcaIndex: number, 
+    submarcaIndex: number, 
+    campo: keyof Submarca, 
+    valor: string
+  ) => {
+    const nuevasMarcas = [...marcas];
+    const submarcas = nuevasMarcas[marcaIndex].submarcas || [];
+    submarcas[submarcaIndex] = { ...submarcas[submarcaIndex], [campo]: valor };
+    nuevasMarcas[marcaIndex].submarcas = submarcas;
     setMarcas(nuevasMarcas);
   };
 
@@ -297,72 +360,159 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
   };
 
   // Guardar empresa
-  const guardarEmpresa = () => {
+  const guardarEmpresa = async () => {
     if (!validarFormulario()) {
       return;
     }
 
-    const empresaId = generarEmpresaId();
+    setGuardando(true);
 
-    const datosEmpresa = {
-      empresaId,
-      nombreFiscal,
-      cif,
-      domicilioFiscal,
-      nombreComercial,
-      logoComercial,
-      convenioColectivoId,
-      empresaActiva,
-      marcas: marcas.map(marca => ({
-        ...marca,
-        empresaId,
-      })),
-      puntosVenta: puntosVenta.map((pv, index) => ({
-        ...pv,
-        puntoVentaId: `PDV-${String(index + 1).padStart(3, '0')}`,
-        empresaId,
-      })),
-      cuentasBancarias: cuentasBancarias.map((cuenta, index) => ({
-        ...cuenta,
-        cuentaId: `CTA-${String(index + 1).padStart(3, '0')}`,
-        empresaId,
-      })),
-    };
-
-    console.log('📦 Datos de empresa a enviar a BBDD:', datosEmpresa);
-    
-    // ⭐ GUARDAR MARCAS EN LOCALSTORAGE GLOBAL (Sistema de Marcas MADRE)
     try {
-      const nuevasMarcas = marcas.map(marca => ({
-        id: marca.marcaCodigo,
-        codigo: marca.marcaCodigo,
-        nombre: marca.marcaNombre,
-        color: marca.colorIdentidad,
-        logo: marca.logoUrl || '',
-        empresaId: empresaId,
-        empresaNombre: nombreComercial || nombreFiscal,
-        activo: empresaActiva,
-        fechaCreacion: new Date().toISOString()
-      }));
-      
-      // Usar helper centralizado para guardar marcas
-      const guardado = guardarMarcasMultiples(nuevasMarcas);
-      
-      if (guardado) {
-        console.log('✅ Marcas MADRE guardadas correctamente');
-      } else {
-        console.error('❌ Error al guardar marcas');
-      }
-    } catch (error) {
-      console.error('❌ Error al guardar marcas en localStorage:', error);
-    }
-    
-    // TODO: Aquí el programador debe enviar datosEmpresa a la API/Base de datos
-    // await api.post('/empresas', datosEmpresa);
+      const empresaId = generarEmpresaId();
 
-    toast.success('Empresa creada correctamente');
-    onOpenChange(false);
-    resetearFormulario();
+      // 1️⃣ CREAR EMPRESA EN SUPABASE
+      const datosEmpresa = {
+        codigo: empresaId,
+        nombreFiscal,
+        nombreComercial,
+        cif,
+        domicilioFiscal,
+        logoComercial,
+        convenioColectivoId,
+        activo: empresaActiva,
+      };
+
+      console.log('📦 Creando empresa:', datosEmpresa);
+      
+      const responseEmpresa = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/empresas`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${publicAnonKey}`
+        },
+        body: JSON.stringify(datosEmpresa),
+      });
+
+      const resultEmpresa = await responseEmpresa.json();
+
+      if (!responseEmpresa.ok || !resultEmpresa.success) {
+        throw new Error(resultEmpresa.error || 'Error al crear empresa');
+      }
+
+      toast.success('✅ Empresa creada');
+
+      // 2️⃣ CREAR MARCAS EN SUPABASE
+      for (let i = 0; i < marcas.length; i++) {
+        const marca = marcas[i];
+        
+        const datosMarca = {
+          codigo: marca.marcaCodigo,
+          nombre: marca.marcaNombre,
+          empresaId: empresaId,
+          colorPrincipal: marca.colorIdentidad,
+          colorSecundario: '#000000',
+          logoUrl: marca.logoUrl || '',
+          activo: true,
+        };
+
+        console.log(`📦 Creando marca ${i + 1}:`, datosMarca);
+
+        const responseMarca = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/marcas`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify(datosMarca),
+        });
+
+        const resultMarca = await responseMarca.json();
+
+        if (!responseMarca.ok || !resultMarca.success) {
+          console.error(`❌ Error al crear marca ${marca.marcaNombre}:`, resultMarca.error);
+          toast.error(`Error al crear marca ${marca.marcaNombre}`);
+          continue;
+        }
+
+        toast.success(`✅ Marca ${marca.marcaNombre} creada`);
+
+        // 3️⃣ CREAR SUBMARCAS DE ESTA MARCA
+        if (marca.submarcas && marca.submarcas.length > 0) {
+          for (let j = 0; j < marca.submarcas.length; j++) {
+            const submarca = marca.submarcas[j];
+            
+            const datosSubmarca = {
+              codigo: submarca.submarcaCodigo,
+              nombre: submarca.submarcaNombre,
+              marcaId: marca.marcaCodigo,
+              tipoProducto: submarca.tipoProducto,
+              colorPrincipal: submarca.colorIdentidad,
+              logoUrl: submarca.logoUrl || '',
+              activo: true,
+            };
+
+            console.log(`📦 Creando submarca ${j + 1} de marca ${marca.marcaNombre}:`, datosSubmarca);
+
+            const responseSubmarca = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/submarcas`, {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${publicAnonKey}`
+              },
+              body: JSON.stringify(datosSubmarca),
+            });
+
+            const resultSubmarca = await responseSubmarca.json();
+
+            if (!responseSubmarca.ok || !resultSubmarca.success) {
+              console.error(`❌ Error al crear submarca ${submarca.submarcaNombre}:`, resultSubmarca.error);
+              toast.error(`Error al crear submarca ${submarca.submarcaNombre}`);
+              continue;
+            }
+
+            toast.success(`✅ Submarca ${submarca.submarcaNombre} creada`);
+          }
+        }
+      }
+      
+      // ⭐ GUARDAR MARCAS EN LOCALSTORAGE GLOBAL (Sistema de Marcas MADRE - Backward compatibility)
+      try {
+        const nuevasMarcas = marcas.map(marca => ({
+          id: marca.marcaCodigo,
+          codigo: marca.marcaCodigo,
+          nombre: marca.marcaNombre,
+          color: marca.colorIdentidad,
+          logo: marca.logoUrl || '',
+          empresaId: empresaId,
+          empresaNombre: nombreComercial || nombreFiscal,
+          activo: empresaActiva,
+          fechaCreacion: new Date().toISOString()
+        }));
+        
+        // Usar helper centralizado para guardar marcas
+        const guardado = guardarMarcasMultiples(nuevasMarcas);
+        
+        if (guardado) {
+          console.log('✅ Marcas MADRE guardadas correctamente en localStorage');
+        } else {
+          console.error('❌ Error al guardar marcas en localStorage');
+        }
+      } catch (error) {
+        console.error('❌ Error al guardar marcas en localStorage:', error);
+      }
+
+      toast.success('🎉 ¡Empresa, marcas y submarcas creadas exitosamente!', {
+        description: `${marcas.length} marca(s) creada(s) con sus submarcas`
+      });
+      
+      onOpenChange(false);
+      resetearFormulario();
+    } catch (error) {
+      console.error('❌ Error al guardar empresa:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al guardar la empresa');
+    } finally {
+      setGuardando(false);
+    }
   };
 
   // Resetear formulario
@@ -515,14 +665,19 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
 
             <Separator />
 
-            {/* 2. MARCAS DE LA EMPRESA */}
+            {/* 2. MARCAS Y SUBMARCAS (PRODUCTOS) */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Store className="h-4 w-4 text-gray-600" />
-                  <h3 className="font-medium text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    2. Marcas de la Empresa
-                  </h3>
+                  <div>
+                    <h3 className="font-medium text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                      2. Marcas y Submarcas (Productos)
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Las submarcas agrupan los productos (Ej: Marca "HoyPecamos" → Submarcas "Modomio" y "BlackBurger")
+                    </p>
+                  </div>
                 </div>
                 <Button
                   size="sm"
@@ -538,8 +693,11 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
               {marcas.length === 0 && (
                 <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
                   <Store className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 mb-1">
                     No hay marcas añadidas. Haz clic en "Añadir Marca" para crear una.
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    📋 Jerarquía: Empresa → Marca → <span className="font-semibold text-teal-600">Submarca (Productos)</span> → PDV
                   </p>
                 </div>
               )}
@@ -638,6 +796,122 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
                               />
                             </div>
                           </div>
+                        </div>
+
+                        {/* Submarcas */}
+                        <div className="space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label className="text-sm font-semibold text-gray-900">Submarcas (Productos)</Label>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Las submarcas agrupan productos específicos de esta marca
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => añadirSubmarca(index)}
+                              className="gap-2 bg-white"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Añadir Submarca
+                            </Button>
+                          </div>
+
+                          {marca.submarcas && marca.submarcas.length > 0 && (
+                            <div className="space-y-2">
+                              {marca.submarcas.map((submarca, submarcaIndex) => (
+                                <Card key={submarcaIndex} className="border-2">
+                                  <CardContent className="p-4">
+                                    <div className="flex items-start justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200">
+                                          {submarca.submarcaCodigo}
+                                        </Badge>
+                                        <span className="text-sm text-gray-600">Submarca {submarcaIndex + 1}</span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => eliminarSubmarca(index, submarcaIndex)}
+                                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-3">
+                                      <div className="space-y-2">
+                                        <Label>Nombre de la Submarca <span className="text-red-500">*</span></Label>
+                                        <Input
+                                          placeholder="Ej: Modomio, BlackBurger"
+                                          value={submarca.submarcaNombre}
+                                          onChange={(e) => actualizarSubmarca(index, submarcaIndex, 'submarcaNombre', e.target.value)}
+                                        />
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <Label>Tipo de Producto <span className="text-red-500">*</span></Label>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button variant="outline" className="w-full justify-between">
+                                              {submarca.tipoProducto || 'Seleccionar tipo'}
+                                              <ChevronDown className="h-4 w-4 ml-2 opacity-50" />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent className="w-full">
+                                            <DropdownMenuItem
+                                              onClick={() => actualizarSubmarca(index, submarcaIndex, 'tipoProducto', 'pizza')}
+                                            >
+                                              Pizza
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => actualizarSubmarca(index, submarcaIndex, 'tipoProducto', 'hamburguesa')}
+                                            >
+                                              Hamburguesa
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => actualizarSubmarca(index, submarcaIndex, 'tipoProducto', 'bebida')}
+                                            >
+                                              Bebida
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => actualizarSubmarca(index, submarcaIndex, 'tipoProducto', 'postre')}
+                                            >
+                                              Postre
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => actualizarSubmarca(index, submarcaIndex, 'tipoProducto', 'otro')}
+                                            >
+                                              Otro
+                                            </DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <Label>Color Identidad</Label>
+                                        <div className="flex gap-2">
+                                          <Input
+                                            type="color"
+                                            value={submarca.colorIdentidad}
+                                            onChange={(e) => actualizarSubmarca(index, submarcaIndex, 'colorIdentidad', e.target.value)}
+                                            className="w-16 h-10 p-1"
+                                          />
+                                          <Input
+                                            value={submarca.colorIdentidad}
+                                            onChange={(e) => actualizarSubmarca(index, submarcaIndex, 'colorIdentidad', e.target.value)}
+                                            placeholder="#0d9488"
+                                            className="flex-1"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -902,8 +1176,13 @@ export function ModalCrearEmpresa({ open, onOpenChange }: ModalCrearEmpresaProps
             <Button 
               onClick={guardarEmpresa}
               className="bg-teal-600 hover:bg-teal-700"
+              disabled={guardando}
             >
-              <Building2 className="h-4 w-4 mr-2" />
+              {guardando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Building2 className="h-4 w-4 mr-2" />
+              )}
               Crear Empresa
             </Button>
           </DialogFooter>

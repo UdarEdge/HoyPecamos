@@ -14,8 +14,8 @@ import { PersonalRRHH } from './gerente/PersonalRRHH';
 import { StockProveedores } from './gerente/StockProveedores';
 import { ProductividadGerente } from './gerente/ProductividadGerente';
 import { EquipoRRHH } from './gerente/EquipoRRHH';
-import { IntegracionesDelivery } from './gerente/IntegracionesDelivery';
 import { PedidosGerente } from './gerente/PedidosGerente';
+import { ProcesadorPedidosCanales } from './gerente/ProcesadorPedidosCanales'; // 🤖 PROCESADOR AUTOMÁTICO
 import { PUNTOS_VENTA_ARRAY, getNombrePDVConMarcas, getNombreMarca, MARCAS } from '../constants/empresaConfig';
 import { NotificacionesGerente } from './gerente/NotificacionesGerente';
 import { AyudaGerente } from './gerente/AyudaGerente';
@@ -52,15 +52,12 @@ import {
   Percent,
   UserMinus,
   Menu,
-  LogOut,
-  Truck,
-  Calendar
+  LogOut
 } from 'lucide-react';
 
 // ⚡ Lazy Loading de componentes pesados (TPV y modales)
 const TPV360Master = lazy(() => import('./TPV360Master').then(m => ({ default: m.TPV360Master })));
 const ModalSeleccionTPV = lazy(() => import('./gerente/ModalSeleccionTPV').then(m => ({ default: m.ModalSeleccionTPV })));
-const GestionCitas = lazy(() => import('./gerente/GestionCitas').then(m => ({ default: m.GestionCitas })));
 
 import type { PermisosTPV } from './TPV360Master';
 
@@ -89,7 +86,6 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
   const impagos = 5;
   const urgentes = 2;
   const noLeidos = 8;
-  const citasPendientes = 5; // Badge para citas solicitadas
 
   const menuItems: MenuItem[] = [
     { 
@@ -109,14 +105,8 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
       icon: Receipt 
     },
     { 
-      id: 'citas', 
-      label: 'Gestión de Citas', 
-      icon: Calendar,
-      badge: citasPendientes > 0 ? citasPendientes : undefined 
-    },
-    { 
       id: 'clientes', 
-      label: 'Clientes y Productos', 
+      label: 'Productos y Clientes', 
       icon: Users 
     },
     { 
@@ -128,11 +118,6 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
       id: 'proveedores', 
       label: 'Stock y Proveedores', 
       icon: Package 
-    },
-    { 
-      id: 'integraciones-delivery', 
-      label: 'Integraciones Delivery', 
-      icon: Truck 
     },
     { 
       id: 'operativa', 
@@ -369,20 +354,12 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
         return <ClientesGerente />;
       case 'pedidos':
         return <PedidosGerente />;
-      case 'citas':
-        return (
-          <Suspense fallback={<LoadingFallback />}>
-            <GestionCitas />
-          </Suspense>
-        );
       case 'facturacion':
         return <FacturacionFinanzas />;
       case 'personal':
         return <PersonalRRHH />;
       case 'proveedores':
         return <StockProveedores />;
-      case 'integraciones-delivery':
-        return <IntegracionesDelivery />;
       case 'productividad':
         return <ProductividadGerente />;
       case 'equipo':
@@ -432,6 +409,9 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
 
   return (
     <div className="min-h-screen bg-gray-50 flex overflow-x-hidden">
+      {/* 🤖 PROCESADOR AUTOMÁTICO DE PEDIDOS (componente invisible en background) */}
+      <ProcesadorPedidosCanales />
+      
       {/* Sidebar - Desktop & Tablet */}
       <Sidebar
         user={user}

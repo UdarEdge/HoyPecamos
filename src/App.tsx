@@ -28,7 +28,9 @@ import { initWebVitals } from './lib/web-vitals';
 import { inicializarCronJobs } from './services/cron-jobs';
 import { getConfig } from './config/white-label.config';
 import { inicializarMarcasDefault } from './utils/marcasHelper';
+import './utils/seed-data'; // 🌱 Seed data disponible en consola
 import { SupabaseTest } from './components/SupabaseTest';
+import { SelectorRapidoPerfiles } from './components/SelectorRapidoPerfiles'; // ⭐ NUEVO
 
 // Lazy Loading de componentes pesados
 const ClienteDashboard = lazy(() => import('./components/ClienteDashboard').then(m => ({ default: m.ClienteDashboard })));
@@ -170,6 +172,21 @@ function App() {
     setAppState('app');
   };
 
+  // ⭐ NUEVO: Login rápido para desarrollo (desde onboarding)
+  const handleLoginRapido = (rol: 'cliente' | 'trabajador' | 'gerente') => {
+    const usuarioDemo: User = {
+      id: `demo-${rol}-${Date.now()}`,
+      name: `Usuario ${rol.charAt(0).toUpperCase() + rol.slice(1)}`,
+      email: `${rol}@demo.com`,
+      role: rol
+    };
+    setCurrentUser(usuarioDemo);
+    setAppState('app');
+    analytics.setUserId(usuarioDemo.id);
+    analytics.logLogin('quick-login');
+    analytics.logScreenView('Dashboard', rol);
+  };
+
   // ============================================================================
   // RENDER POR ESTADOS
   // ============================================================================
@@ -218,6 +235,7 @@ function App() {
         <Onboarding 
           onFinish={handleOnboardingFinish}
           onSkip={handleOnboardingSkip}
+          onLoginRapido={handleLoginRapido} // ⭐ NUEVO
         />
         <ConnectionIndicator />
         <OptimizedToaster />
@@ -247,6 +265,16 @@ function App() {
           onFinish={handlePermissionsFinish}
           onSkip={handlePermissionsFinish}
         />
+        
+        {/* ⭐ SELECTOR RÁPIDO DE PERFILES - También visible en pantalla de permisos */}
+        {currentUser && (
+          <SelectorRapidoPerfiles 
+            currentRole={currentUser.role}
+            onCambiarRol={handleCambiarRol}
+            branding={branding}
+          />
+        )}
+        
         <ConnectionIndicator />
         <OptimizedToaster />
       </ErrorBoundary>
@@ -280,6 +308,13 @@ function App() {
                         </Suspense>
                       )}
                     
+                      {/* ⭐ SELECTOR RÁPIDO DE PERFILES - Botón flotante */}
+                      <SelectorRapidoPerfiles 
+                        currentRole={currentUser.role}
+                        onCambiarRol={handleCambiarRol}
+                        branding={branding}
+                      />
+
                       <ConnectionIndicator />
                       
                       {/* Modal de actualización */}

@@ -183,7 +183,7 @@ export function AlertasStock() {
             </div>
             <Button
               onClick={() => setModalPedidoAbierto(true)}
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
             >
               <Plus className="w-4 h-4 mr-2" />
               Nuevo Pedido
@@ -233,7 +233,7 @@ export function AlertasStock() {
                           <Button
                             size="sm"
                             onClick={() => crearPedidoAutomatico(proveedorNombre)}
-                            className="bg-teal-600 hover:bg-teal-700"
+                            className="bg-[#ED1C24] hover:bg-[#c91820] text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
                           >
                             <ShoppingCart className="w-4 h-4 mr-1" />
                             Crear Pedido

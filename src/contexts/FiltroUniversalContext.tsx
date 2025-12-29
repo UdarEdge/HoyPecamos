@@ -13,6 +13,7 @@ interface FiltroUniversalContextType {
   // Helpers
   getEmpresasSeleccionadas: () => string[];
   getMarcasSeleccionadas: () => string[];
+  getSubmarcasSeleccionadas: () => string[];  // ⭐ NUEVO
   getPDVsSeleccionados: () => string[];
   isFiltered: () => boolean;
 }
@@ -166,6 +167,16 @@ export function FiltroUniversalProvider({ children, initialData }: FiltroUnivers
     return Array.from(marcas);
   };
 
+  const getSubmarcasSeleccionadas = (): string[] => {  // ⭐ NUEVO
+    const submarcas = new Set<string>();
+    filtroData.selectedContext.forEach(ctx => {
+      if (ctx.submarca_id) {
+        submarcas.add(ctx.submarca_id);
+      }
+    });
+    return Array.from(submarcas);
+  };
+
   const getPDVsSeleccionados = (): string[] => {
     const pdvs = new Set<string>();
     filtroData.selectedContext.forEach(ctx => {
@@ -209,6 +220,7 @@ export function FiltroUniversalProvider({ children, initialData }: FiltroUnivers
     resetFiltros,
     getEmpresasSeleccionadas,
     getMarcasSeleccionadas,
+    getSubmarcasSeleccionadas,  // ⭐ NUEVO
     getPDVsSeleccionados,
     isFiltered
   };
@@ -250,11 +262,13 @@ export function generarWhereClause(filtroData: FiltroUniversalData): {
   if (filtroData.selectedContext.length > 0) {
     const empresaIds = new Set<string>();
     const marcaIds = new Set<string>();
+    const submarcaIds = new Set<string>();  // ⭐ NUEVO
     const pdvIds = new Set<string>();
 
     filtroData.selectedContext.forEach(ctx => {
       empresaIds.add(ctx.empresa_id);
       if (ctx.marca_id) marcaIds.add(ctx.marca_id);
+      if (ctx.submarca_id) submarcaIds.add(ctx.submarca_id);  // ⭐ NUEVO
       if (ctx.punto_venta_id) pdvIds.add(ctx.punto_venta_id);
     });
 
@@ -267,7 +281,7 @@ export function generarWhereClause(filtroData: FiltroUniversalData): {
     // Marca (si se especificó alguna)
     if (marcaIds.size > 0) {
       const hasEmpresaWide = filtroData.selectedContext.some(
-        ctx => ctx.marca_id === null && ctx.punto_venta_id === null
+        ctx => ctx.marca_id === null && ctx.submarca_id === null && ctx.punto_venta_id === null
       );
       
       if (hasEmpresaWide) {
@@ -278,13 +292,27 @@ export function generarWhereClause(filtroData: FiltroUniversalData): {
       params.marcaIds = Array.from(marcaIds);
     }
 
-    // PDV (si se especificó alguno)
-    if (pdvIds.size > 0) {
+    // Submarca (si se especificó alguna) ⭐ NUEVO
+    if (submarcaIds.size > 0) {
       const hasMarcaWide = filtroData.selectedContext.some(
-        ctx => ctx.marca_id !== null && ctx.punto_venta_id === null
+        ctx => ctx.marca_id !== null && ctx.submarca_id === null && ctx.punto_venta_id === null
       );
       
       if (hasMarcaWide) {
+        conditions.push('(submarca_id IN (:submarcaIds) OR submarca_id IS NOT NULL)');
+      } else {
+        conditions.push('submarca_id IN (:submarcaIds)');
+      }
+      params.submarcaIds = Array.from(submarcaIds);
+    }
+
+    // PDV (si se especificó alguno)
+    if (pdvIds.size > 0) {
+      const hasSubmarcaWide = filtroData.selectedContext.some(
+        ctx => ctx.marca_id !== null && ctx.submarca_id !== null && ctx.punto_venta_id === null
+      );
+      
+      if (hasSubmarcaWide) {
         conditions.push('(punto_venta_id IN (:pdvIds) OR punto_venta_id IS NOT NULL)');
       } else {
         conditions.push('punto_venta_id IN (:pdvIds)');

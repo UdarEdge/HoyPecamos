@@ -1,0 +1,19 @@
+La tarea es eliminar las siguientes líneas del archivo GerenteDashboard.tsx:
+
+1. En el array menuItems (líneas 111-116), eliminar:
+    { 
+      id: 'citas', 
+      label: 'Gestión de Citas', 
+      icon: Calendar,
+      badge: citasPendientes > 0 ? citasPendientes : undefined 
+    },
+
+2. En el renderContent(), eliminar el caso 'citas' (líneas 372-377):
+      case 'citas':
+        return (
+          <Suspense fallback={<LoadingFallback />}>\n            <GestionCitas />\n          </Suspense>\n        );
+
+3. Eliminar el import lazy de GestionCitas (línea 63):
+const GestionCitas = lazy(() => import('./gerente/GestionCitas').then(m => ({ default: m.GestionCitas })));
+
+4. Eliminar Calendar de los imports de lucide-react (línea 57)

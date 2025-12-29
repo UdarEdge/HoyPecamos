@@ -1,29 +1,8 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { 
-  Mail, 
-  Lock, 
-  Eye,
-  EyeOff,
-  Fingerprint,
-  User,
-  Phone,
-  Building2,
-  Sparkles,
-  ArrowRight,
-  FileText,
-  MapPin,
-  Briefcase,
-  Globe,
-  Plus,
-  ChevronDown,
-  ChevronUp,
-} from 'lucide-react';
+import { motion } from 'motion/react';
 import { toast } from 'sonner@2.0.3';
 import { ACTIVE_TENANT } from '../config/tenant.config';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
 import {
   signInWithGoogle,
   signInWithFacebook,
@@ -37,10 +16,39 @@ import {
 } from '../services/oauth.service';
 import { SelectorMarcaCliente } from './cliente/SelectorMarcaCliente';
 import { DevilHeartLogo } from './icons/DevilHeartLogo';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { 
+  Mail, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  ArrowRight, 
+  User, 
+  Fingerprint,
+  Phone,
+  Building2,
+  Plus,
+  ChevronUp,
+  FileText,
+  MapPin,
+  Briefcase,
+  Globe
+} from 'lucide-react';
 
 // Importar logos HoyPecamos (igual que SplashScreen)
 import logoHoyPecamos from 'figma:asset/a3428b28dbe9517759563dab398d0145766bcbf4.png';
 import textoHoyPecamos from 'figma:asset/c51377fad35836fd711cff8bb83c268403db4cac.png';
+
+// Tipo de usuario
+interface UserType {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  marca?: string;
+}
 
 interface LoginViewMobileProps {
   onLogin: (user: UserType) => void;
@@ -176,41 +184,46 @@ export function LoginViewMobile({ onLogin }: LoginViewMobileProps) {
     try {
       setLoading(true);
 
-      // TODO: Conectar con API real
-      // const response = await fetch('/api/auth/register', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     email,
-      //     password,
-      //     fullName,
-      //     phone,
-      //     hasCompany,
-      //     companyName: hasCompany ? companyName : null,
-      //     cif: hasCompany ? cif : null,
-      //     address: hasCompany ? address : null,
-      //     sector: hasCompany ? sector : null,
-      //     website: hasCompany ? website : null,
-      //   }),
-      // });
-      // const { user, token, refreshToken } = await response.json();
-      // localStorage.setItem('token', token);
-      // localStorage.setItem('refreshToken', refreshToken);
+      // 🔥 CONECTAR CON BACKEND REAL
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/auth/signup`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${publicAnonKey}`
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          nombre: fullName,
+          rol: 'cliente', // ✅ SIEMPRE 'cliente' al registrarse desde la app
+          marcaId: 'MRC-HOYPECAMOS', // Por defecto, asignamos a Hoy Pecamos
+          telefono: phone,
+          hasCompany: showCompanyFields,
+          companyName: showCompanyFields ? companyName : null,
+          cif: showCompanyFields ? cif : null,
+          direccion: showCompanyFields ? address : null,
+          sector: showCompanyFields ? sector : null,
+          website: showCompanyFields ? website : null,
+        }),
+      });
 
-      // Simulación
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Error al registrar usuario');
+      }
 
       // ⚠️ IMPORTANTE: SIEMPRE se registra como "cliente"
       // El rol de "admin/gerente" se asigna SOLO desde el backend
       // "hasCompany" es SOLO para facturación, NO para permisos
       const user: UserType = {
-        id: Math.random().toString(36).substring(7),
+        id: result.userId,
         name: fullName,
         email,
         role: 'cliente', // ✅ SIEMPRE 'cliente' al registrarse
       };
 
-      const successMessage = hasCompany 
+      const successMessage = showCompanyFields 
         ? `¡Bienvenido a ${config.appName}, ${companyName}! 🎉`
         : `¡Bienvenido a ${config.appName}! 🎉`;
       
@@ -219,7 +232,7 @@ export function LoginViewMobile({ onLogin }: LoginViewMobileProps) {
       setView('select-marca'); // Cambiar a vista de selección de marca
     } catch (error) {
       console.error('Register error:', error);
-      toast.error('Error al crear la cuenta. Intenta de nuevo.');
+      toast.error(error instanceof Error ? error.message : 'Error al crear la cuenta. Intenta de nuevo.');
     } finally {
       setLoading(false);
     }

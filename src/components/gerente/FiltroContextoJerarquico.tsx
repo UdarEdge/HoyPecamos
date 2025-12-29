@@ -1,25 +1,28 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { ChevronRight, ChevronDown, Building2, Tag, Store, Check } from 'lucide-react';
+import { ChevronRight, ChevronDown, Building2, Tag, Store, Check, Package } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { 
   EMPRESAS, 
   MARCAS, 
+  SUBMARCAS,
   PUNTOS_VENTA,
   getNombreEmpresa,
   getNombreMarca,
+  getNombreSubmarca,
   getNombrePDV
 } from '../../constants/empresaConfig';
 
 // ============================================================================
-// TIPOS DE DATOS
+// TIPOS DE DATOS - ACTUALIZADO CON SUBMARCAS
 // ============================================================================
 
 export interface SelectedContext {
   empresa_id: string;
   marca_id: string | null;
+  submarca_id: string | null;  // ⭐ NUEVO: Nivel de submarcas
   punto_venta_id: string | null;
 }
 
@@ -35,6 +38,16 @@ interface Marca {
   codigo_marca: string;
   nombre: string;
   empresa_id: string;
+  submarcas: Submarca[];  // ⭐ NUEVO: Contiene submarcas
+}
+
+interface Submarca {
+  submarca_id: string;
+  codigo_submarca: string;
+  nombre: string;
+  icono: string;
+  marca_id: string;
+  empresa_id: string;
   puntos_venta: PuntoVenta[];
 }
 
@@ -42,6 +55,7 @@ interface PuntoVenta {
   punto_venta_id: string;
   codigo_punto_venta: string;
   nombre_comercial: string;
+  submarca_id: string;
   marca_id: string;
   empresa_id: string;
 }
@@ -53,7 +67,7 @@ interface FiltroContextoJerarquicoProps {
 }
 
 // ============================================================================
-// DATOS MOCK - Transformados desde empresaConfig.ts
+// DATOS MOCK - Transformados desde empresaConfig.ts CON SUBMARCAS
 // ============================================================================
 
 const EMPRESAS_MOCK: Empresa[] = Object.values(EMPRESAS).map(empresa => {
@@ -62,24 +76,41 @@ const EMPRESAS_MOCK: Empresa[] = Object.values(EMPRESAS).map(empresa => {
     const marca = MARCAS[marcaId];
     if (!marca) return null;
     
-    // Obtener PDVs que tienen esta marca
-    const puntosVentaMarca = empresa.puntosVentaIds
-      .map(pdvId => PUNTOS_VENTA[pdvId])
-      .filter(pdv => pdv && pdv.marcasDisponibles.includes(marcaId))
-      .map(pdv => ({
-        punto_venta_id: pdv.id,
-        codigo_punto_venta: pdv.codigo,
-        nombre_comercial: pdv.nombre,
+    // Obtener todas las submarcas de la marca
+    const submarcasMarca = marca.submarcasIds.map(submarcaId => {
+      const submarca = SUBMARCAS[submarcaId];
+      if (!submarca) return null;
+      
+      // Obtener PDVs que tienen esta submarca
+      const puntosVentaSubmarca = empresa.puntosVentaIds
+        .map(pdvId => PUNTOS_VENTA[pdvId])
+        .filter(pdv => pdv && pdv.submarcasDisponibles && pdv.submarcasDisponibles.includes(submarcaId))
+        .map(pdv => ({
+          punto_venta_id: pdv!.id,
+          codigo_punto_venta: pdv!.codigo,
+          nombre_comercial: pdv!.nombre,
+          submarca_id: submarca.id,
+          marca_id: marca.id,
+          empresa_id: empresa.id
+        }));
+      
+      return {
+        submarca_id: submarca.id,
+        codigo_submarca: submarca.codigo,
+        nombre: submarca.nombre,
+        icono: submarca.icono || '🏪',
         marca_id: marca.id,
-        empresa_id: empresa.id
-      }));
+        empresa_id: empresa.id,
+        puntos_venta: puntosVentaSubmarca
+      };
+    }).filter(Boolean) as Submarca[];
     
     return {
       marca_id: marca.id,
       codigo_marca: marca.codigo,
       nombre: marca.nombre,
       empresa_id: empresa.id,
-      puntos_venta: puntosVentaMarca
+      submarcas: submarcasMarca
     };
   }).filter(Boolean) as Marca[];
   
@@ -103,22 +134,23 @@ export function FiltroContextoJerarquico({
   const [open, setOpen] = useState(false);
   const [expandedEmpresas, setExpandedEmpresas] = useState<string[]>([]);
   const [expandedMarcas, setExpandedMarcas] = useState<string[]>([]);
+  const [expandedSubmarcas, setExpandedSubmarcas] = useState<string[]>([]);  // ⭐ NUEVO
 
-  // ⭐ Auto-expandir empresas y marcas cuando se abre el filtro
+  // ⭐ Auto-expandir SOLO empresas cuando se abre el filtro (marcas y submarcas cerradas)
   useEffect(() => {
     if (open && expandedEmpresas.length === 0) {
-      // Expandir todas las empresas
+      // Expandir solo las empresas (marcas y submarcas quedan colapsadas)
       const todasEmpresas = empresas.map(e => e.empresa_id);
       setExpandedEmpresas(todasEmpresas);
       
-      // Expandir todas las marcas
-      const todasMarcas = empresas.flatMap(e => e.marcas.map(m => m.marca_id));
-      setExpandedMarcas(todasMarcas);
+      // NO expandir marcas ni submarcas por defecto
+      // setExpandedMarcas([]);
+      // setExpandedSubmarcas([]);
     }
   }, [open, empresas]);
 
   // ============================================================================
-  // LÓGICA DE SELECCIÓN
+  // LÓGICA DE SELECCIÓN - ACTUALIZADA CON SUBMARCAS
   // ============================================================================
 
   // Verificar si toda una empresa está seleccionada
@@ -126,14 +158,14 @@ export function FiltroContextoJerarquico({
     const empresa = empresas.find(e => e.empresa_id === empresaId);
     if (!empresa) return false;
 
-    // Si existe una selección de toda la empresa (sin marca ni PDV específico)
+    // Si existe una selección de toda la empresa (sin marca, submarca ni PDV específico)
     const hasEmpresaWideSelection = selectedContext.some(
-      ctx => ctx.empresa_id === empresaId && ctx.marca_id === null && ctx.punto_venta_id === null
+      ctx => ctx.empresa_id === empresaId && ctx.marca_id === null && ctx.submarca_id === null && ctx.punto_venta_id === null
     );
     
     if (hasEmpresaWideSelection) return true;
 
-    // O si todas las marcas y sus PDV están seleccionados
+    // O si todas las marcas y sus submarcas están seleccionados
     if (empresa.marcas.length === 0) return false;
     
     return empresa.marcas.every(marca => isMarcaFullySelected(empresaId, marca.marca_id));
@@ -147,26 +179,56 @@ export function FiltroContextoJerarquico({
     const marca = empresa.marcas.find(m => m.marca_id === marcaId);
     if (!marca) return false;
 
-    // Si existe una selección de toda la marca (sin PDV específico)
+    // Si existe una selección de toda la marca (sin submarca ni PDV específico)
     const hasMarcaWideSelection = selectedContext.some(
-      ctx => ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.punto_venta_id === null
+      ctx => ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.submarca_id === null && ctx.punto_venta_id === null
     );
     
     if (hasMarcaWideSelection) return true;
 
-    // O si todos los PDV están seleccionados
-    if (marca.puntos_venta.length === 0) return false;
+    // O si todas las submarcas están seleccionadas
+    if (marca.submarcas.length === 0) return false;
     
-    return marca.puntos_venta.every(pdv => 
-      isPuntoVentaSelected(empresaId, marcaId, pdv.punto_venta_id)
+    return marca.submarcas.every(submarca => 
+      isSubmarcaFullySelected(empresaId, marcaId, submarca.submarca_id)
+    );
+  };
+
+  // ⭐ NUEVO: Verificar si toda una submarca está seleccionada
+  const isSubmarcaFullySelected = (empresaId: string, marcaId: string, submarcaId: string): boolean => {
+    const empresa = empresas.find(e => e.empresa_id === empresaId);
+    if (!empresa) return false;
+    
+    const marca = empresa.marcas.find(m => m.marca_id === marcaId);
+    if (!marca) return false;
+    
+    const submarca = marca.submarcas.find(s => s.submarca_id === submarcaId);
+    if (!submarca) return false;
+
+    // Si existe una selección de toda la submarca (sin PDV específico)
+    const hasSubmarcaWideSelection = selectedContext.some(
+      ctx => ctx.empresa_id === empresaId && 
+             ctx.marca_id === marcaId && 
+             ctx.submarca_id === submarcaId && 
+             ctx.punto_venta_id === null
+    );
+    
+    if (hasSubmarcaWideSelection) return true;
+
+    // O si todos los PDV están seleccionados
+    if (submarca.puntos_venta.length === 0) return false;
+    
+    return submarca.puntos_venta.every(pdv => 
+      isPuntoVentaSelected(empresaId, marcaId, submarcaId, pdv.punto_venta_id)
     );
   };
 
   // Verificar si un punto de venta está seleccionado
-  const isPuntoVentaSelected = (empresaId: string, marcaId: string, pdvId: string): boolean => {
+  const isPuntoVentaSelected = (empresaId: string, marcaId: string, submarcaId: string, pdvId: string): boolean => {
     return selectedContext.some(
       ctx => ctx.empresa_id === empresaId && 
              ctx.marca_id === marcaId && 
+             ctx.submarca_id === submarcaId &&
              ctx.punto_venta_id === pdvId
     );
   };
@@ -193,13 +255,31 @@ export function FiltroContextoJerarquico({
     const marca = empresa.marcas.find(m => m.marca_id === marcaId);
     if (!marca) return false;
 
-    return marca.puntos_venta.some(pdv => 
-      isPuntoVentaSelected(empresaId, marcaId, pdv.punto_venta_id)
+    return marca.submarcas.some(submarca => 
+      isSubmarcaFullySelected(empresaId, marcaId, submarca.submarca_id) || 
+      isSubmarcaPartiallySelected(empresaId, marcaId, submarca.submarca_id)
+    );
+  };
+
+  const isSubmarcaPartiallySelected = (empresaId: string, marcaId: string, submarcaId: string): boolean => {
+    if (isSubmarcaFullySelected(empresaId, marcaId, submarcaId)) return false;
+    
+    const empresa = empresas.find(e => e.empresa_id === empresaId);
+    if (!empresa) return false;
+    
+    const marca = empresa.marcas.find(m => m.marca_id === marcaId);
+    if (!marca) return false;
+    
+    const submarca = marca.submarcas.find(s => s.submarca_id === submarcaId);
+    if (!submarca) return false;
+
+    return submarca.puntos_venta.some(pdv => 
+      isPuntoVentaSelected(empresaId, marcaId, submarcaId, pdv.punto_venta_id)
     );
   };
 
   // ============================================================================
-  // HANDLERS DE SELECCIÓN
+  // HANDLERS DE SELECCIÓN - ACTUALIZADOS CON SUBMARCAS
   // ============================================================================
 
   const handleToggleEmpresa = (empresaId: string) => {
@@ -218,6 +298,7 @@ export function FiltroContextoJerarquico({
       newContext.push({
         empresa_id: empresaId,
         marca_id: null,
+        submarca_id: null,
         punto_venta_id: null
       });
       onChange(newContext);
@@ -247,19 +328,50 @@ export function FiltroContextoJerarquico({
       newContext.push({
         empresa_id: empresaId,
         marca_id: marcaId,
+        submarca_id: null,
         punto_venta_id: null
       });
       onChange(newContext);
     }
   };
 
-  const handleTogglePuntoVenta = (empresaId: string, marcaId: string, pdvId: string) => {
-    const isCurrentlySelected = isPuntoVentaSelected(empresaId, marcaId, pdvId);
+  const handleToggleSubmarca = (empresaId: string, marcaId: string, submarcaId: string) => {
+    const isCurrentlySelected = isSubmarcaFullySelected(empresaId, marcaId, submarcaId);
+
+    if (isCurrentlySelected) {
+      // DESELECCIONAR: eliminar todos los contextos de esta submarca
+      const newContext = selectedContext.filter(
+        ctx => !(ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.submarca_id === submarcaId)
+      );
+      onChange(newContext);
+    } else {
+      // SELECCIONAR: eliminar contextos parciales de esta submarca y añadir selección total
+      let newContext = selectedContext.filter(
+        ctx => !(ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.submarca_id === submarcaId)
+      );
+      
+      // Eliminar también selecciones más amplias
+      newContext = newContext.filter(
+        ctx => !(ctx.empresa_id === empresaId && (ctx.marca_id === null || (ctx.marca_id === marcaId && ctx.submarca_id === null)))
+      );
+      
+      newContext.push({
+        empresa_id: empresaId,
+        marca_id: marcaId,
+        submarca_id: submarcaId,
+        punto_venta_id: null
+      });
+      onChange(newContext);
+    }
+  };
+
+  const handleTogglePuntoVenta = (empresaId: string, marcaId: string, submarcaId: string, pdvId: string) => {
+    const isCurrentlySelected = isPuntoVentaSelected(empresaId, marcaId, submarcaId, pdvId);
 
     if (isCurrentlySelected) {
       // DESELECCIONAR: eliminar este PDV específico
       const newContext = selectedContext.filter(
-        ctx => !(ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.punto_venta_id === pdvId)
+        ctx => !(ctx.empresa_id === empresaId && ctx.marca_id === marcaId && ctx.submarca_id === submarcaId && ctx.punto_venta_id === pdvId)
       );
       onChange(newContext);
     } else {
@@ -270,13 +382,16 @@ export function FiltroContextoJerarquico({
       newContext = newContext.filter(
         ctx => !(
           ctx.empresa_id === empresaId && 
-          (ctx.marca_id === null || (ctx.marca_id === marcaId && ctx.punto_venta_id === null))
+          (ctx.marca_id === null || 
+           (ctx.marca_id === marcaId && ctx.submarca_id === null) ||
+           (ctx.marca_id === marcaId && ctx.submarca_id === submarcaId && ctx.punto_venta_id === null))
         )
       );
       
       newContext.push({
         empresa_id: empresaId,
         marca_id: marcaId,
+        submarca_id: submarcaId,
         punto_venta_id: pdvId
       });
       onChange(newContext);
@@ -303,6 +418,14 @@ export function FiltroContextoJerarquico({
     );
   };
 
+  const toggleSubmarcaExpansion = (submarcaId: string) => {
+    setExpandedSubmarcas(prev => 
+      prev.includes(submarcaId) 
+        ? prev.filter(id => id !== submarcaId)
+        : [...prev, submarcaId]
+    );
+  };
+
   // ============================================================================
   // HELPERS DE VISUALIZACIÓN
   // ============================================================================
@@ -319,10 +442,15 @@ export function FiltroContextoJerarquico({
         .filter(ctx => ctx.marca_id !== null)
         .map(ctx => `${ctx.empresa_id}-${ctx.marca_id}`)
     );
+    const submarcasUnicas = new Set(
+      selectedContext
+        .filter(ctx => ctx.submarca_id !== null)
+        .map(ctx => `${ctx.empresa_id}-${ctx.marca_id}-${ctx.submarca_id}`)
+    );
     const pdvsUnicos = new Set(
       selectedContext
         .filter(ctx => ctx.punto_venta_id !== null)
-        .map(ctx => `${ctx.empresa_id}-${ctx.marca_id}-${ctx.punto_venta_id}`)
+        .map(ctx => `${ctx.empresa_id}-${ctx.marca_id}-${ctx.submarca_id}-${ctx.punto_venta_id}`)
     );
 
     const parts: string[] = [];
@@ -333,8 +461,11 @@ export function FiltroContextoJerarquico({
     if (marcasUnicas.size > 0) {
       parts.push(`${marcasUnicas.size} marca${marcasUnicas.size > 1 ? 's' : ''}`);
     }
+    if (submarcasUnicas.size > 0) {
+      parts.push(`${submarcasUnicas.size} submarca${submarcasUnicas.size > 1 ? 's' : ''}`);
+    }
     if (pdvsUnicos.size > 0) {
-      parts.push(`${pdvsUnicos.size} PDV${pdvsUnicos.size > 1 ? 's' : ''}`);
+      parts.push(`${pdvsUnicos.size} PDV${pdvsUnicos.size > 1 ? 's' : ''}`)
     }
 
     return parts.join(', ') || 'Ninguna selección';
@@ -456,22 +587,6 @@ export function FiltroContextoJerarquico({
                   {/* NIVEL 2: MARCAS */}
                   {expandedEmpresas.includes(empresa.empresa_id) && (
                     <div className="ml-6 mt-1">
-                      <div 
-                        className="flex items-center gap-2 hover:bg-gray-50 rounded p-2 mb-1 cursor-pointer"
-                        onClick={() => handleToggleMarca(empresa.empresa_id, 'TODAS')}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isEmpresaFullySelected(empresa.empresa_id)}
-                          onChange={() => handleToggleMarca(empresa.empresa_id, 'TODAS')}
-                          className="w-4 h-4 cursor-pointer"
-                        />
-                        <Tag className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-600 italic">
-                          Todas las marcas
-                        </span>
-                      </div>
-
                       {empresa.marcas.map(marca => (
                         <div key={marca.marca_id} className="mb-1">
                           <div className="flex items-center gap-1 hover:bg-gray-50 rounded p-2">
@@ -516,44 +631,96 @@ export function FiltroContextoJerarquico({
                             </div>
                           </div>
 
-                          {/* NIVEL 3: PUNTOS DE VENTA */}
+                          {/* NIVEL 3: SUBMARCAS ⭐ NUEVO */}
                           {expandedMarcas.includes(marca.marca_id) && (
                             <div className="ml-6 mt-1">
-                              <div 
-                                className="flex items-center gap-2 hover:bg-gray-50 rounded p-2 mb-1 cursor-pointer"
-                                onClick={() => handleToggleMarca(empresa.empresa_id, marca.marca_id)}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isMarcaFullySelected(empresa.empresa_id, marca.marca_id)}
-                                  onChange={() => handleToggleMarca(empresa.empresa_id, marca.marca_id)}
-                                  className="w-4 h-4 cursor-pointer"
-                                />
-                                <Store className="w-4 h-4 text-gray-400" />
-                                <span className="text-sm text-gray-600 italic">
-                                  Todos los puntos de venta
-                                </span>
-                              </div>
+                              {marca.submarcas.map(submarca => (
+                                <div key={submarca.submarca_id} className="mb-1">
+                                  <div className="flex items-center gap-1 hover:bg-gray-50 rounded p-2">
+                                    <button
+                                      onClick={() => toggleSubmarcaExpansion(submarca.submarca_id)}
+                                      className="p-1 hover:bg-gray-100 rounded"
+                                    >
+                                      {expandedSubmarcas.includes(submarca.submarca_id) ? (
+                                        <ChevronDown className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                    
+                                    <div 
+                                      className="flex items-center gap-2 flex-1 cursor-pointer"
+                                      onClick={() => handleToggleSubmarca(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                    >
+                                      <div className="relative">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSubmarcaFullySelected(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                          onChange={() => handleToggleSubmarca(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                          className="w-4 h-4 cursor-pointer"
+                                          style={{
+                                            accentColor: isSubmarcaPartiallySelected(empresa.empresa_id, marca.marca_id, submarca.submarca_id) ? '#f59e0b' : undefined
+                                          }}
+                                        />
+                                        {isSubmarcaPartiallySelected(empresa.empresa_id, marca.marca_id, submarca.submarca_id) && (
+                                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <div className="w-2 h-0.5 bg-orange-600" />
+                                          </div>
+                                        )}
+                                      </div>
+                                      <span className="text-base">{submarca.icono}</span>
+                                      <Package className="w-4 h-4 text-purple-600" />
+                                      <span className="text-sm">
+                                        {submarca.nombre}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs">
+                                        {submarca.codigo_submarca}
+                                      </Badge>
+                                    </div>
+                                  </div>
 
-                              {marca.puntos_venta.map(pdv => (
-                                <div 
-                                  key={pdv.punto_venta_id}
-                                  className="flex items-center gap-2 hover:bg-gray-50 rounded p-2 ml-6 cursor-pointer"
-                                  onClick={() => handleTogglePuntoVenta(empresa.empresa_id, marca.marca_id, pdv.punto_venta_id)}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isPuntoVentaSelected(empresa.empresa_id, marca.marca_id, pdv.punto_venta_id)}
-                                    onChange={() => handleTogglePuntoVenta(empresa.empresa_id, marca.marca_id, pdv.punto_venta_id)}
-                                    className="w-4 h-4 cursor-pointer"
-                                  />
-                                  <Store className="w-4 h-4 text-green-600" />
-                                  <span className="text-sm">
-                                    {pdv.nombre_comercial}
-                                  </span>
-                                  <Badge variant="outline" className="text-xs">
-                                    {pdv.codigo_punto_venta}
-                                  </Badge>
+                                  {/* NIVEL 4: PUNTOS DE VENTA */}
+                                  {expandedSubmarcas.includes(submarca.submarca_id) && (
+                                    <div className="ml-6 mt-1">
+                                      <div 
+                                        className="flex items-center gap-2 hover:bg-gray-50 rounded p-2 mb-1 cursor-pointer"
+                                        onClick={() => handleToggleSubmarca(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isSubmarcaFullySelected(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                          onChange={() => handleToggleSubmarca(empresa.empresa_id, marca.marca_id, submarca.submarca_id)}
+                                          className="w-4 h-4 cursor-pointer"
+                                        />
+                                        <Store className="w-4 h-4 text-gray-400" />
+                                        <span className="text-sm text-gray-600 italic">
+                                          Todos los puntos de venta
+                                        </span>
+                                      </div>
+
+                                      {submarca.puntos_venta.map(pdv => (
+                                        <div 
+                                          key={pdv.punto_venta_id}
+                                          className="flex items-center gap-2 hover:bg-gray-50 rounded p-2 ml-6 cursor-pointer"
+                                          onClick={() => handleTogglePuntoVenta(empresa.empresa_id, marca.marca_id, submarca.submarca_id, pdv.punto_venta_id)}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={isPuntoVentaSelected(empresa.empresa_id, marca.marca_id, submarca.submarca_id, pdv.punto_venta_id)}
+                                            onChange={() => handleTogglePuntoVenta(empresa.empresa_id, marca.marca_id, submarca.submarca_id, pdv.punto_venta_id)}
+                                            className="w-4 h-4 cursor-pointer"
+                                          />
+                                          <Store className="w-4 h-4 text-green-600" />
+                                          <span className="text-sm">
+                                            {pdv.nombre_comercial}
+                                          </span>
+                                          <Badge variant="outline" className="text-xs">
+                                            {pdv.codigo_punto_venta}
+                                          </Badge>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -585,147 +752,3 @@ export function FiltroContextoJerarquico({
     </Popover>
   );
 }
-
-// ============================================================================
-// DOCUMENTACIÓN TÉCNICA
-// ============================================================================
-
-/*
-INTEGRACIÓN CON MAKE / BBDD
-============================
-
-1. ESTRUCTURA DE DATOS ENVIADA A MAKE:
---------------------------------------
-{
-  "user_id": "uuid-pau",
-  "rol_global": "GerenteGeneral",
-  "selected_context": [
-    {
-      "empresa_id": "EMP-001",
-      "marca_id": null,
-      "punto_venta_id": null
-    },
-    {
-      "empresa_id": "EMP-002",
-      "marca_id": "MRC-003",
-      "punto_venta_id": "PDV-BCN"
-    }
-  ],
-  "timestamp": "2025-11-26T10:30:00Z"
-}
-
-2. INTERPRETACIÓN DE NULLABLES:
---------------------------------
-• empresa_id: "EMP-001", marca_id: null, punto_venta_id: null
-  → TODAS las marcas y PDV de EMP-001
-
-• empresa_id: "EMP-001", marca_id: "MRC-001", punto_venta_id: null
-  → TODOS los PDV de la marca MRC-001
-
-• empresa_id: "EMP-001", marca_id: "MRC-001", punto_venta_id: "PDV-TIANA"
-  → SOLO el PDV-TIANA de la marca MRC-001
-
-• selected_context: []
-  → TODAS las empresas, marcas y PDV (sin filtro)
-
-3. QUERY SQL PARA FILTRAR DATOS:
----------------------------------
--- Función auxiliar para verificar si un registro cumple el filtro
-CREATE OR REPLACE FUNCTION match_context_filter(
-  p_empresa_id VARCHAR,
-  p_marca_id VARCHAR,
-  p_punto_venta_id VARCHAR,
-  p_selected_context JSONB
-) RETURNS BOOLEAN AS $$
-DECLARE
-  context_item JSONB;
-BEGIN
-  -- Si no hay filtro, mostrar todo
-  IF jsonb_array_length(p_selected_context) = 0 THEN
-    RETURN TRUE;
-  END IF;
-  
-  -- Verificar si el registro coincide con algún contexto seleccionado
-  FOR context_item IN SELECT * FROM jsonb_array_elements(p_selected_context)
-  LOOP
-    -- Verificar empresa
-    IF (context_item->>'empresa_id') = p_empresa_id THEN
-      
-      -- Si marca_id es null en el contexto, incluye todas las marcas
-      IF (context_item->>'marca_id') IS NULL THEN
-        RETURN TRUE;
-      END IF;
-      
-      -- Verificar marca
-      IF (context_item->>'marca_id') = p_marca_id THEN
-        
-        -- Si punto_venta_id es null en el contexto, incluye todos los PDV
-        IF (context_item->>'punto_venta_id') IS NULL THEN
-          RETURN TRUE;
-        END IF;
-        
-        -- Verificar punto de venta exacto
-        IF (context_item->>'punto_venta_id') = p_punto_venta_id THEN
-          RETURN TRUE;
-        END IF;
-        
-      END IF;
-    END IF;
-  END LOOP;
-  
-  RETURN FALSE;
-END;
-$$ LANGUAGE plpgsql;
-
--- Ejemplo de uso en consulta de EBITDA
-SELECT 
-  pv.empresa_id,
-  pv.marca_id,
-  pv.punto_venta_id,
-  SUM(ventas) as total_ventas,
-  SUM(costes) as total_costes,
-  SUM(ventas - costes) as ebitda
-FROM datos_financieros df
-INNER JOIN punto_venta pv ON df.punto_venta_id = pv.punto_venta_id
-WHERE match_context_filter(
-  pv.empresa_id, 
-  pv.marca_id, 
-  pv.punto_venta_id,
-  :selected_context::JSONB
-)
-GROUP BY pv.empresa_id, pv.marca_id, pv.punto_venta_id;
-
-4. ENDPOINT API:
-----------------
-POST /api/gerente/dashboard/filter
-{
-  "selected_context": [...]
-}
-
-Response:
-{
-  "kpis": {
-    "ebitda": 125000,
-    "margen": 34.5,
-    "nps": 8.4,
-    ...
-  },
-  "filtered_by": "2 empresas, 3 marcas, 5 PDVs"
-}
-
-5. EVENTOS MAKE:
-----------------
-• Evento: context_filter_changed
-• Trigger: Cuando el usuario aplica el filtro
-• Acciones:
-  1. Recalcular KPIs con nuevo filtro
-  2. Actualizar gráficos EBITDA
-  3. Filtrar datos de tablas
-  4. Guardar preferencia de filtro en usuario
-
-6. CACHÉ Y OPTIMIZACIÓN:
-------------------------
-• Cachear resultados por combinación de selected_context
-• Invalidar caché cuando cambian datos financieros
-• Pre-calcular agregaciones comunes (por empresa, por marca)
-*/

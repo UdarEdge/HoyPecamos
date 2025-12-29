@@ -34,6 +34,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../ui/collapsible';
+import { Switch } from '../ui/switch';
 import { OnboardingWidget } from '../OnboardingWidget';
 import { FiltroContextoJerarquico, SelectedContext } from './FiltroContextoJerarquico';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
@@ -48,6 +49,8 @@ import {
 } from '../../constants/empresaConfig';
 import { onboardingService } from '../../services/onboarding.service';
 import type { EstadisticasOnboarding } from '../../types/onboarding.types';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import { toast } from 'sonner@2.0.3';
 import { 
   TrendingUp, 
   TrendingDown,
@@ -80,7 +83,10 @@ import {
   Store,
   Truck,
   ShoppingBag,
-  Bike
+  Bike,
+  Download,
+  FileDown,
+  FileSpreadsheet
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import {
@@ -94,6 +100,7 @@ import {
 import { CuentaResultados } from './CuentaResultados';
 import { Escandallo } from './Escandallo';
 import { ResponsiveTable } from '../ui/responsive-table';
+import { SeccionProductosTopVentas } from './SeccionProductosTopVentas';
 
 // ============================================
 // TIPOS PARA LA ESTRUCTURA DEL API
@@ -139,6 +146,30 @@ interface VentasAPIResponse {
   variacion_terceros?: number;
   ventas_efectivo?: number;
   variacion_efectivo?: number;
+}
+
+// ============================================
+// TIPOS PARA PRODUCTOS MÁS VENDIDOS
+// ============================================
+interface ProductoTop {
+  producto_id: string;
+  producto_nombre: string;
+  producto_imagen: string;
+  categoria: string;
+  submarca_nombre: string;
+  submarca_icono: string;
+  unidades_vendidas: number;
+  total_ingresos: number;
+  precio_promedio: number;
+  porcentaje_ventas: number;
+  tendencia: "subida" | "bajada" | "estable";
+  variacion_vs_anterior: number;
+}
+
+interface ProductosTopAPIResponse {
+  productos: ProductoTop[];
+  total_productos_unicos: number;
+  total_unidades_vendidas: number;
 }
 
 // ============================================
@@ -277,9 +308,6 @@ export function Dashboard360() {
   const [filtroResultados, setFiltroResultados] = useState<string>('Estructura');
   const [selectedContext, setSelectedContext] = useState<SelectedContext[]>([]);
   
-  // Nuevo estado para filtro PDV simple (estilo Clientes)
-  const [filtroPDV, setFiltroPDV] = useState<string[]>([]);
-  
   // Estados para filtros temporales
   const [diaSeleccionado, setDiaSeleccionado] = useState<string>('');
   const [mesSeleccionado, setMesSeleccionado] = useState<string>('');
@@ -292,11 +320,16 @@ export function Dashboard360() {
   const [paginaActualCierres, setPaginaActualCierres] = useState<number>(1);
   const [cargandoDatos, setCargandoDatos] = useState<boolean>(false);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  
+  // ⭐ NUEVO: Estados para productos top
+  const [productosTop, setProductosTop] = useState<ProductoTop[]>([]);
+  const [cargandoProductos, setCargandoProductos] = useState<boolean>(false);
 
   // Estados para EBITDA - Comparativa
   const [tipoPeriodoEBITDA, setTipoPeriodoEBITDA] = useState<string>('Mes completo');
   const [comparativaEBITDA, setComparativaEBITDA] = useState<boolean>(false);
   const [tiendaComparativaEBITDA, setTiendaComparativaEBITDA] = useState<string>('Can Farines Poblenou');
+  const [contextComparativaEBITDA, setContextComparativaEBITDA] = useState<SelectedContext[]>([]);
 
   // Estado para estadísticas de onboarding
   const [estadisticasOnboarding, setEstadisticasOnboarding] = useState<EstadisticasOnboarding | null>(null);
@@ -348,23 +381,284 @@ export function Dashboard360() {
     }
   };
 
-  // useEffect para simular actualización de datos cuando cambian filtros
-  useEffect(() => {
-    // Simulamos una pequeña carga
-    setCargandoDatos(true);
+  // ⭐ HELPER: Calcular fechas según periodo seleccionado
+  const calcularFechaInicio = (): string => {
+    const hoy = new Date();
     
-    // Simulamos delay de red
-    setTimeout(() => {
-      // Actualizamos los datos mock con los filtros aplicados
-      setDatosVentasAPI({
-        ...MOCK_DATA_VENTAS,
-        periodo_tipo: periodoSeleccionado,
-        fecha_inicio: diaSeleccionado ? `${añoSeleccionado}-${mesSeleccionado?.padStart(2, '0')}-${diaSeleccionado.padStart(2, '0')}` : MOCK_DATA_VENTAS.fecha_inicio,
-        fecha_fin: diaSeleccionado ? `${añoSeleccionado}-${mesSeleccionado?.padStart(2, '0')}-${diaSeleccionado.padStart(2, '0')}` : MOCK_DATA_VENTAS.fecha_fin,
-      });
-      setCargandoDatos(false);
-    }, 300);
+    switch(periodoSeleccionado) {
+      case 'hoy':
+        return hoy.toISOString().split('T')[0];
+      
+      case 'ayer': {
+        const ayer = new Date(hoy);
+        ayer.setDate(ayer.getDate() - 1);
+        return ayer.toISOString().split('T')[0];
+      }
+      
+      case 'semana_actual': {
+        const inicioSemana = new Date(hoy);
+        const diaSemana = inicioSemana.getDay();
+        const diff = diaSemana === 0 ? -6 : 1 - diaSemana;
+        inicioSemana.setDate(inicioSemana.getDate() + diff);
+        return inicioSemana.toISOString().split('T')[0];
+      }
+      
+      case 'mes_actual': {
+        const mes = mesSeleccionado || (hoy.getMonth() + 1).toString();
+        return `${añoSeleccionado}-${mes.padStart(2, '0')}-01`;
+      }
+      
+      case 'mes_anterior': {
+        const mesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+        return mesAnterior.toISOString().split('T')[0];
+      }
+      
+      case 'trimestre_actual': {
+        const trimestreInicio = Math.floor(hoy.getMonth() / 3) * 3;
+        return `${añoSeleccionado}-${(trimestreInicio + 1).toString().padStart(2, '0')}-01`;
+      }
+      
+      case 'año_actual':
+        return `${añoSeleccionado}-01-01`;
+      
+      case 'personalizado':
+        if (diaSeleccionado && mesSeleccionado) {
+          return `${añoSeleccionado}-${mesSeleccionado.padStart(2, '0')}-${diaSeleccionado.padStart(2, '0')}`;
+        }
+        return MOCK_DATA_VENTAS.fecha_inicio;
+      
+      default:
+        return MOCK_DATA_VENTAS.fecha_inicio;
+    }
+  };
+
+  const calcularFechaFin = (): string => {
+    const hoy = new Date();
+    
+    switch(periodoSeleccionado) {
+      case 'hoy':
+      case 'ayer':
+        return calcularFechaInicio();
+      
+      case 'semana_actual':
+        return hoy.toISOString().split('T')[0];
+      
+      case 'mes_actual': {
+        const mes = mesSeleccionado || (hoy.getMonth() + 1).toString();
+        const ultimoDia = new Date(parseInt(añoSeleccionado), parseInt(mes), 0);
+        return ultimoDia.toISOString().split('T')[0];
+      }
+      
+      case 'mes_anterior': {
+        const mesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+        const ultimoDia = new Date(mesAnterior.getFullYear(), mesAnterior.getMonth() + 1, 0);
+        return ultimoDia.toISOString().split('T')[0];
+      }
+      
+      case 'trimestre_actual': {
+        const trimestreFin = Math.floor(hoy.getMonth() / 3) * 3 + 2;
+        const ultimoDia = new Date(parseInt(añoSeleccionado), trimestreFin + 1, 0);
+        return ultimoDia.toISOString().split('T')[0];
+      }
+      
+      case 'año_actual':
+        return `${añoSeleccionado}-12-31`;
+      
+      case 'personalizado':
+        if (diaSeleccionado && mesSeleccionado) {
+          return `${añoSeleccionado}-${mesSeleccionado.padStart(2, '0')}-${diaSeleccionado.padStart(2, '0')}`;
+        }
+        return MOCK_DATA_VENTAS.fecha_fin;
+      
+      default:
+        return MOCK_DATA_VENTAS.fecha_fin;
+    }
+  };
+
+  // ⭐ NUEVO: Fetch datos de ventas desde API real
+  useEffect(() => {
+    const fetchDatosVentas = async () => {
+      setCargandoDatos(true);
+      setErrorCarga(null);
+      
+      try {
+        // Construir parámetros desde filtros actuales
+        const params = new URLSearchParams({
+          empresa_id: selectedContext[0]?.empresa_id || 'EMPRESA-001',
+          fecha_inicio: calcularFechaInicio(),
+          fecha_fin: calcularFechaFin(),
+          periodo_comparacion: 'mes_anterior'
+        });
+        
+        // Añadir filtros opcionales
+        if (selectedContext[1]?.marca_id) {
+          params.append('marca_id', selectedContext[1].marca_id);
+        }
+        if (selectedContext[2]?.submarca_id) {
+          params.append('submarca_id', selectedContext[2].submarca_id);
+        }
+        // Extraer PDV desde selectedContext
+        const pdvIds = selectedContext
+          .filter(ctx => ctx.punto_venta_id !== null)
+          .map(ctx => ctx.punto_venta_id!);
+        if (pdvIds.length > 0 && pdvIds[0]) {
+          params.append('punto_venta_id', pdvIds[0]);
+        }
+        
+        const response = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/dashboard/ventas?${params}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${publicAnonKey}`
+            }
+          }
+        );
+        
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        // Si hay error en la respuesta
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        setDatosVentasAPI(data);
+        console.log('✅ Datos de ventas cargados desde API:', data);
+        
+      } catch (error) {
+        console.error('❌ Error al cargar datos de ventas:', error);
+        setErrorCarga('No se pudieron cargar los datos. Mostrando datos de ejemplo.');
+        
+        // Fallback a MOCK
+        setDatosVentasAPI({
+          ...MOCK_DATA_VENTAS,
+          periodo_tipo: periodoSeleccionado,
+          fecha_inicio: calcularFechaInicio(),
+          fecha_fin: calcularFechaFin(),
+        });
+      } finally {
+        setCargandoDatos(false);
+      }
+    };
+    
+    fetchDatosVentas();
   }, [selectedContext, periodoSeleccionado, diaSeleccionado, mesSeleccionado, añoSeleccionado]);
+
+  // ⭐ NUEVO: Fetch productos más vendidos desde API real
+  useEffect(() => {
+    const fetchProductosTop = async () => {
+      setCargandoProductos(true);
+      
+      try {
+        const params = new URLSearchParams({
+          empresa_id: selectedContext[0]?.empresa_id || 'EMPRESA-001',
+          fecha_inicio: calcularFechaInicio(),
+          fecha_fin: calcularFechaFin(),
+          limit: '10'
+        });
+        
+        if (selectedContext[1]?.marca_id) {
+          params.append('marca_id', selectedContext[1].marca_id);
+        }
+        if (selectedContext[2]?.submarca_id) {
+          params.append('submarca_id', selectedContext[2].submarca_id);
+        }
+        // Extraer PDV desde selectedContext
+        const pdvIds = selectedContext
+          .filter(ctx => ctx.punto_venta_id !== null)
+          .map(ctx => ctx.punto_venta_id!);
+        if (pdvIds.length > 0 && pdvIds[0]) {
+          params.append('punto_venta_id', pdvIds[0]);
+        }
+        
+        const response = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/dashboard/productos-top?${params}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${publicAnonKey}`
+            }
+          }
+        );
+        
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        setProductosTop(data.productos || []);
+        console.log('✅ Productos top cargados desde API:', data);
+        
+      } catch (error) {
+        console.error('❌ Error al cargar productos top:', error);
+        setProductosTop([]);
+      } finally {
+        setCargandoProductos(false);
+      }
+    };
+    
+    fetchProductosTop();
+  }, [selectedContext, periodoSeleccionado, diaSeleccionado, mesSeleccionado, añoSeleccionado]);
+
+  // ⭐ FUNCIÓN: Exportar datos a CSV
+  const exportarDatosVentas = async (formato: 'csv' | 'excel') => {
+    try {
+      const params = new URLSearchParams({
+        empresa_id: selectedContext[0]?.empresa_id || 'EMPRESA-001',
+        fecha_inicio: calcularFechaInicio(),
+        fecha_fin: calcularFechaFin(),
+        format: formato
+      });
+      
+      if (selectedContext[1]?.marca_id) {
+        params.append('marca_id', selectedContext[1].marca_id);
+      }
+      if (selectedContext[2]?.submarca_id) {
+        params.append('submarca_id', selectedContext[2].submarca_id);
+      }
+      // Extraer PDV desde selectedContext
+      const pdvIds = selectedContext
+        .filter(ctx => ctx.punto_venta_id !== null)
+        .map(ctx => ctx.punto_venta_id!);
+      if (pdvIds.length > 0 && pdvIds[0]) {
+        params.append('punto_venta_id', pdvIds[0]);
+      }
+      
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-ae2ba659/dashboard/ventas/export?${params}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${publicAnonKey}`
+          }
+        }
+      );
+      
+      if (!response.ok) throw new Error('Error al exportar');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const fechaActual = new Date().toISOString().split('T')[0];
+      a.download = `ventas_${fechaActual}.${formato}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success(`Datos exportados correctamente a ${formato.toUpperCase()}`);
+    } catch (error) {
+      console.error('Error al exportar:', error);
+      toast.error('Error al exportar los datos');
+    }
+  };
 
   // useEffect para cargar estadísticas de onboarding
   useEffect(() => {
@@ -1561,19 +1855,49 @@ export function Dashboard360() {
       );
     }
 
-    if (errorCarga) {
-      return (
-        <div className="flex justify-center items-center h-96">
-          <AlertCircle className="w-10 h-10 text-red-500" />
-          <p className="text-red-500 text-sm mt-2">{errorCarga}</p>
-        </div>
-      );
-    }
-
     const { ventas_periodo, pedidos_periodo, productos_vendidos, ticket_medio_pedido, ticket_medio_producto, costes_variables_periodo, costes_fijos_imputados_periodo, comisiones_tpv_periodo, comisiones_plataformas_periodo, comisiones_pasarela_periodo, margen_neto_periodo, variacion_ventas_periodo, variacion_margen_neto_periodo, ingresos_ultimos_5_meses, gastos_ultimos_5_meses, labels_ultimos_5_meses, categorias_ingresos, valores_ingresos_categorias, ventas_mostrador, variacion_mostrador, ventas_app_web, variacion_app_web, ventas_terceros, variacion_terceros, ventas_efectivo, variacion_efectivo } = datosVentasAPI;
 
     return (
       <div className="space-y-4 sm:space-y-6">
+        {/* Banner de error (si hay) mostrando fallback a datos de ejemplo */}
+        {errorCarga && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-yellow-800 font-medium">Mostrando datos de ejemplo</p>
+              <p className="text-xs text-yellow-700 mt-1">{errorCarga}</p>
+            </div>
+          </div>
+        )}
+        {/* Header con título y botones de exportación */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base sm:text-lg text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
+              📊 Ventas por Canal
+            </h3>
+            <p className="text-xs text-gray-500">Desglose de ventas según origen</p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => exportarDatosVentas('csv')}
+              className="bg-black text-white hover:bg-gray-800 h-9 px-3 text-xs sm:text-sm"
+              size="sm"
+            >
+              <FileDown className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+              CSV
+            </Button>
+            <Button
+              onClick={() => exportarDatosVentas('excel')}
+              variant="outline"
+              className="border-black text-black hover:bg-gray-50 h-9 px-3 text-xs sm:text-sm hidden sm:flex"
+              size="sm"
+            >
+              <FileSpreadsheet className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+              Excel
+            </Button>
+          </div>
+        </div>
+
         {/* Cuadros KPIs de Ventas */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {/* Mostrador */}
@@ -1823,6 +2147,13 @@ export function Dashboard360() {
             </CardContent>
           </Card>
         </div>
+
+        {/* ⭐ NUEVA SECCIÓN: Productos Más Vendidos */}
+        <SeccionProductosTopVentas
+          productos={productosTop}
+          cargando={cargandoProductos}
+          onExportar={() => exportarDatosVentas('csv')}
+        />
       </div>
     );
   };
@@ -2077,186 +2408,80 @@ export function Dashboard360() {
 
   return (
     <div className="space-y-4 pb-6">
-      {/* Header */}
-      <div className="pb-2">
-        <h2 className="text-lg sm:text-xl md:text-2xl text-gray-900" style={{ fontFamily: 'Poppins, sans-serif' }}>
-          Dashboard 360°
-        </h2>
-        <p className="text-gray-600 text-xs sm:text-sm">Visión completa del negocio</p>
-      </div>
-
       {/* Filtros */}
-      <div className="flex flex-wrap gap-1.5 sm:gap-2 pb-2">
-        <Button
-          variant={filtroActivo === 'resumen' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('resumen')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'resumen' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          Resumen
-        </Button>
-        <Button
-          variant={filtroActivo === 'ventas' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('ventas')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'ventas' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <DollarSign className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          Ventas
-        </Button>
-        <Button
-          variant={filtroActivo === 'cierres' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('cierres')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'cierres' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Calculator className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          Cierres
-        </Button>
-        <Button
-          variant={filtroActivo === 'ebitda' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('ebitda')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'ebitda' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Calculator className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          EBITDA
-        </Button>
-        <Button
-          variant={filtroActivo === 'escandallo' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('escandallo')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'escandallo' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          <span className="hidden sm:inline">Escandallo</span>
-          <span className="sm:hidden">Escand.</span>
-        </Button>
-        <Button
-          variant={filtroActivo === 'operativa' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('operativa')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'operativa' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <Target className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          Operativa
-        </Button>
-        <Button
-          variant={filtroActivo === 'alertas' ? 'default' : 'outline'}
-          onClick={() => setFiltroActivo('alertas')}
-          className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 ${filtroActivo === 'alertas' ? 'bg-teal-600 hover:bg-teal-700' : ''}`}
-        >
-          <AlertTriangle className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-          Alertas
-        </Button>
+      <div className="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex gap-1.5 sm:gap-2 min-w-max">
+          <Button
+            variant={filtroActivo === 'resumen' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('resumen')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'resumen' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            Resumen
+          </Button>
+          <Button
+            variant={filtroActivo === 'ventas' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('ventas')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'ventas' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <DollarSign className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            Ventas
+          </Button>
+          <Button
+            variant={filtroActivo === 'cierres' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('cierres')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'cierres' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <Calculator className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            Cierres
+          </Button>
+          <Button
+            variant={filtroActivo === 'ebitda' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('ebitda')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'ebitda' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <Calculator className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            EBITDA
+          </Button>
+          <Button
+            variant={filtroActivo === 'escandallo' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('escandallo')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'escandallo' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            <span className="hidden sm:inline">Escandallo</span>
+            <span className="sm:hidden">Escand.</span>
+          </Button>
+          <Button
+            variant={filtroActivo === 'operativa' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('operativa')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'operativa' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <Target className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            Operativa
+          </Button>
+          <Button
+            variant={filtroActivo === 'alertas' ? 'default' : 'outline'}
+            onClick={() => setFiltroActivo('alertas')}
+            className={`h-9 sm:h-10 text-xs sm:text-sm px-2.5 sm:px-4 whitespace-nowrap font-medium rounded-lg transition-all ${filtroActivo === 'alertas' ? 'bg-[#ED1C24] hover:bg-[#c91820] text-white shadow-md' : ''}`}
+          >
+            <AlertTriangle className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+            Alertas
+          </Button>
+        </div>
       </div>
 
       {/* Subfiltro de Contexto y Filtros temporales (Resumen y Ventas) */}
       {(filtroActivo === 'resumen' || filtroActivo === 'ventas') && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Filtro PDV */}
+            {/* Filtro de Contexto Jerárquico */}
             <div>
-              <Label className="text-xs text-gray-600 mb-2 block">Punto de Venta</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-between bg-white text-sm h-10"
-                  >
-                    <span className="truncate">
-                      {filtroPDV.length === 0 
-                        ? 'Todas las empresas' 
-                        : `${filtroPDV.length} seleccionado${filtroPDV.length > 1 ? 's' : ''}`
-                      }
-                    </span>
-                    <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-3" align="start">
-                  <div className="space-y-3">
-                    {/* Empresa */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Empresa</Label>
-                      {EMPRESAS_ARRAY.map(empresa => (
-                        <div key={empresa.id} className="flex items-center gap-2 mb-2">
-                          <Checkbox 
-                            id={`empresa-${empresa.id}`}
-                            checked={filtroPDV.includes(empresa.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setFiltroPDV([...filtroPDV, empresa.id]);
-                              } else {
-                                setFiltroPDV(filtroPDV.filter(item => item !== empresa.id));
-                              }
-                            }}
-                          />
-                          <label htmlFor={`empresa-${empresa.id}`} className="text-sm cursor-pointer">
-                            🏢 {getNombreEmpresa(empresa.id)}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Puntos de Venta */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Puntos de Venta</Label>
-                      <div className="space-y-2">
-                        {PUNTOS_VENTA_ARRAY.map(pdv => (
-                          <div key={pdv.id} className="flex items-center gap-2">
-                            <Checkbox 
-                              id={`pdv-${pdv.id}`}
-                              checked={filtroPDV.includes(pdv.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, pdv.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== pdv.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`pdv-${pdv.id}`} className="text-sm cursor-pointer">
-                              📍 {getNombrePDVConMarcas(pdv.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Marcas */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Marcas</Label>
-                      <div className="space-y-2">
-                        {MARCAS_ARRAY.map(marca => (
-                          <div key={marca.id} className="flex items-center gap-2">
-                            <Checkbox 
-                              id={`marca-${marca.id}`}
-                              checked={filtroPDV.includes(marca.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, marca.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== marca.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`marca-${marca.id}`} className="text-sm cursor-pointer">
-                              {getIconoMarca(marca.id)} {getNombreMarca(marca.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Botón limpiar */}
-                    {filtroPDV.length > 0 && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="w-full text-xs text-red-600 hover:text-red-700"
-                        onClick={() => setFiltroPDV([])}
-                      >
-                        Limpiar selección
-                      </Button>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <Label className="text-xs text-gray-600 mb-2 block">Contexto (Empresa → Marca → Submarca → PDV)</Label>
+              <FiltroContextoJerarquico
+                selectedContext={selectedContext}
+                onChange={setSelectedContext}
+              />
             </div>
 
             {/* Filtro Período */}
@@ -2347,113 +2572,13 @@ export function Dashboard360() {
       {filtroActivo === 'cierres' && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Filtro PDV */}
+            {/* Filtro Contexto Jerárquico - UNIFICADO */}
             <div>
-              <Label className="text-xs text-gray-600 mb-2 block">Punto de Venta</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-between bg-white text-sm h-10"
-                  >
-                    <span className="truncate">
-                      {filtroPDV.length === 0 
-                        ? 'Todas las empresas' 
-                        : `${filtroPDV.length} seleccionado${filtroPDV.length > 1 ? 's' : ''}`
-                      }
-                    </span>
-                    <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-3" align="start">
-                  <div className="space-y-3">
-                    {/* Empresa */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Empresa</Label>
-                      {EMPRESAS_ARRAY.map(empresa => (
-                        <div key={empresa.id} className="flex items-center gap-2 mb-2">
-                          <Checkbox 
-                            id={`cierres-empresa-${empresa.id}`}
-                            checked={filtroPDV.includes(empresa.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setFiltroPDV([...filtroPDV, empresa.id]);
-                              } else {
-                                setFiltroPDV(filtroPDV.filter(item => item !== empresa.id));
-                              }
-                            }}
-                          />
-                          <label htmlFor={`cierres-empresa-${empresa.id}`} className="text-sm cursor-pointer">
-                            🏢 {getNombreEmpresa(empresa.id)}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Puntos de Venta */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Puntos de Venta</Label>
-                      <div className="space-y-2">
-                        {PUNTOS_VENTA_ARRAY.map(pdv => (
-                          <div key={pdv.id} className="flex items-center gap-2">
-                            <Checkbox 
-                              id={`cierres-pdv-${pdv.id}`}
-                              checked={filtroPDV.includes(pdv.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, pdv.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== pdv.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`cierres-pdv-${pdv.id}`} className="text-sm cursor-pointer">
-                              📍 {getNombrePDVConMarcas(pdv.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Marcas */}
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700 mb-2 block">Marcas</Label>
-                      <div className="space-y-2">
-                        {MARCAS_ARRAY.map(marca => (
-                          <div key={marca.id} className="flex items-center gap-2">
-                            <Checkbox 
-                              id={`cierres-marca-${marca.id}`}
-                              checked={filtroPDV.includes(marca.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, marca.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== marca.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`cierres-marca-${marca.id}`} className="text-sm cursor-pointer">
-                              {getIconoMarca(marca.id)} {getNombreMarca(marca.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Botón limpiar */}
-                    {filtroPDV.length > 0 && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="w-full text-xs text-red-600 hover:text-red-700"
-                        onClick={() => setFiltroPDV([])}
-                      >
-                        Limpiar selección
-                      </Button>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <Label className="text-xs text-gray-600 mb-2 block">Contexto (Empresa → Marca → Submarca → PDV)</Label>
+              <FiltroContextoJerarquico
+                selectedContext={selectedContext}
+                onChange={setSelectedContext}
+              />
             </div>
 
             {/* Filtro Período */}
@@ -2542,200 +2667,64 @@ export function Dashboard360() {
 
       {/* Filtros para EBITDA */}
       {filtroActivo === 'ebitda' && (
-        <div className="space-y-3 min-h-[44px]">
-          {/* Filtro PDV */}
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Punto de Venta</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      className="w-full justify-between bg-white text-sm h-10"
-                    >
-                      <span className="truncate">
-                        {filtroPDV.length === 0 
-                          ? 'Todas las empresas' 
-                          : `${filtroPDV.length} seleccionado${filtroPDV.length > 1 ? 's' : ''}`
-                        }
-                      </span>
-                      <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-3" align="start">
-                    <div className="space-y-3">
-                      {/* Empresa */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Empresa</Label>
-                        {EMPRESAS_ARRAY.map(empresa => (
-                          <div key={empresa.id} className="flex items-center gap-2 mb-2">
-                            <Checkbox 
-                              id={`ebitda-empresa-${empresa.id}`}
-                              checked={filtroPDV.includes(empresa.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFiltroPDV([...filtroPDV, empresa.id]);
-                                } else {
-                                  setFiltroPDV(filtroPDV.filter(item => item !== empresa.id));
-                                }
-                              }}
-                            />
-                            <label htmlFor={`ebitda-empresa-${empresa.id}`} className="text-sm cursor-pointer">
-                              🏢 {getNombreEmpresa(empresa.id)}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
+        <div className="space-y-3">
+          {/* Toggle de Comparativa */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${comparativaEBITDA ? 'bg-teal-100' : 'bg-gray-100'}`}>
+                    <Target className={`w-4 h-4 sm:w-5 sm:h-5 ${comparativaEBITDA ? 'text-teal-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium cursor-pointer" htmlFor="comparativa-toggle">
+                      Modo Comparativa
+                    </Label>
+                    <p className="text-xs text-gray-500">
+                      {comparativaEBITDA 
+                        ? 'Comparando objetivos con otra tienda' 
+                        : 'Usar objetivos vs. resultados de otra tienda'
+                      }
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="comparativa-toggle"
+                  checked={comparativaEBITDA}
+                  onCheckedChange={setComparativaEBITDA}
+                  className="data-[state=checked]:bg-teal-600"
+                />
+              </div>
 
-                      {/* Puntos de Venta */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Puntos de Venta</Label>
-                        <div className="space-y-2">
-                          {PUNTOS_VENTA_ARRAY.map(pdv => (
-                            <div key={pdv.id} className="flex items-center gap-2">
-                              <Checkbox 
-                                id={`ebitda-pdv-${pdv.id}`}
-                                checked={filtroPDV.includes(pdv.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setFiltroPDV([...filtroPDV, pdv.id]);
-                                  } else {
-                                    setFiltroPDV(filtroPDV.filter(item => item !== pdv.id));
-                                  }
-                                }}
-                              />
-                              <label htmlFor={`ebitda-pdv-${pdv.id}`} className="text-sm cursor-pointer">
-                                📍 {getNombrePDVConMarcas(pdv.id)}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Marcas */}
-                      <div>
-                        <Label className="text-xs font-medium text-gray-700 mb-2 block">Marcas</Label>
-                        <div className="space-y-2">
-                          {MARCAS_ARRAY.map(marca => (
-                            <div key={marca.id} className="flex items-center gap-2">
-                              <Checkbox 
-                                id={`ebitda-marca-${marca.id}`}
-                                checked={filtroPDV.includes(marca.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setFiltroPDV([...filtroPDV, marca.id]);
-                                  } else {
-                                    setFiltroPDV(filtroPDV.filter(item => item !== marca.id));
-                                  }
-                                }}
-                              />
-                              <label htmlFor={`ebitda-marca-${marca.id}`} className="text-sm cursor-pointer">
-                                {getIconoMarca(marca.id)} {getNombreMarca(marca.id)}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Botón limpiar */}
-                      {filtroPDV.length > 0 && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="w-full text-xs text-red-600 hover:text-red-700"
-                          onClick={() => setFiltroPDV([])}
-                        >
-                          Limpiar selección
-                        </Button>
-                      )}
+              {/* Selector de tienda comparativa */}
+              {comparativaEBITDA && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <Label className="text-xs text-gray-600 mb-2 block">
+                    Tienda de referencia para comparar
+                  </Label>
+                  <FiltroContextoJerarquico
+                    selectedContext={contextComparativaEBITDA}
+                    onChange={(context) => {
+                      setContextComparativaEBITDA(context);
+                      // Actualizar nombre legacy para compatibilidad
+                      if (context.length > 0) {
+                        const pdvId = context[0].punto_venta_id || context[0].marca_id || context[0].empresa_id;
+                        const nombre = getNombrePDVConMarcas(pdvId as any);
+                        setTiendaComparativaEBITDA(nombre);
+                      }
+                    }}
+                    placeholder="Selecciona empresa/marca/PDV de referencia"
+                  />
+                  {contextComparativaEBITDA.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-teal-700">
+                      <CheckCircle className="w-3 h-3" />
+                      <span>Los objetivos se reemplazarán por los resultados reales de la tienda seleccionada</span>
                     </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Período</Label>
-                <Select value={periodoSeleccionado} onValueChange={setPeriodoSeleccionado}>
-                  <SelectTrigger className="w-full bg-white h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hoy">Hoy</SelectItem>
-                    <SelectItem value="ayer">Ayer</SelectItem>
-                    <SelectItem value="semana_actual">Semana actual</SelectItem>
-                    <SelectItem value="mes_actual">{obtenerNombreMesActual()}</SelectItem>
-                    <SelectItem value="mes_anterior">Mes anterior</SelectItem>
-                    <SelectItem value="trimestre_actual">Trimestre actual</SelectItem>
-                    <SelectItem value="año_actual">Año actual</SelectItem>
-                    <SelectItem value="personalizado">Personalizado</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-xs text-gray-600 mb-2 block">Tipo Período</Label>
-                <Select value={tipoPeriodoEBITDA} onValueChange={setTipoPeriodoEBITDA}>
-                  <SelectTrigger className="w-full bg-white h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Mes completo">Mes completo</SelectItem>
-                    <SelectItem value="Últimos 30 días">Últimos 30 días</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          {/* Filtros de comparativa (solo si está activa) */}
-          {comparativaEBITDA && (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-teal-50 rounded-lg border border-teal-200">
-              <span className="text-xs sm:text-sm font-medium text-teal-900">Comparar con:</span>
-              
-              {/* Filtro de tienda comparativa */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1 sm:gap-2 bg-white text-xs sm:text-sm w-full sm:w-auto">
-                    <span className="truncate max-w-[200px]">{tiendaComparativaEBITDA}</span>
-                    <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[280px] max-h-[300px] overflow-y-auto">
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Centro')}>
-                    Can Farines Centro
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Llefià')}>
-                    Can Farines Llefià
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Montigalà')}>
-                    Can Farines Montigalà
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Casagemes')}>
-                    Can Farines Casagemes
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines La Mina')}>
-                    Can Farines La Mina
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Sant Adrià Centro')}>
-                    Can Farines Sant Adrià Centro
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Besòs')}>
-                    Can Farines Besòs
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Poblenou')}>
-                    Can Farines Poblenou
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Sagrada Família')}>
-                    Can Farines Sagrada Família
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTiendaComparativaEBITDA('Can Farines Gràcia')}>
-                    Can Farines Gràcia
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 

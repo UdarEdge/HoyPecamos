@@ -23,8 +23,8 @@ export type EstadoEntrega = 'pendiente' | 'preparando' | 'listo' | 'en_camino' |
 export type MetodoPago = 'tarjeta' | 'efectivo' | 'bizum' | 'transferencia';
 export type TipoEntrega = 'recogida' | 'domicilio';
 
-// ⭐ NUEVO: Origen del pedido
-export type OrigenPedido = 'app' | 'tpv' | 'glovo' | 'justeat' | 'ubereats' | 'deliveroo';
+// ⭐ NUEVO: Origen del pedido (ACTUALIZADO con Web separado)
+export type OrigenPedido = 'app' | 'web' | 'tpv' | 'glovo' | 'justeat' | 'ubereats' | 'deliveroo';
 
 // ⭐ NUEVO: Estado de pago (para efectivo)
 export type EstadoPago = 'pagado' | 'pendiente_cobro';
@@ -239,7 +239,9 @@ const generarIdPedido = (): string => {
 const generarNumeroPedido = (): string => {
   const pedidos = getPedidos();
   const numero = (pedidos.length + 1).toString().padStart(6, '0');
-  return `${new Date().getFullYear()}-${numero}`;
+  // ⭐ Formato acortado: 25-000086 en lugar de 2025-000086
+  const year = new Date().getFullYear().toString().slice(-2); // Últimos 2 dígitos del año
+  return `${year}-${numero}`;
 };
 
 // ============================================================================

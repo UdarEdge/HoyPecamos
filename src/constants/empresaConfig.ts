@@ -4,13 +4,17 @@
  * 
  * IMPORTANTE: Este archivo es la fuente única de verdad para:
  * - Información de empresas
- * - Marcas disponibles (lee desde localStorage 'udar_marcas_sistema')
+ * - Marcas disponibles
+ * - Submarcas (líneas de producto)
  * - Puntos de venta (PDV)
- * - Relaciones jerárquicas: Empresa → Marcas → PDVs
+ * - Relaciones jerárquicas: Empresa → Marca → Submarca → Productos
  * 
- * ⭐ SISTEMA DE MARCAS MADRE:
- * Las marcas se crean desde Gerente → Empresas → Crear/Editar Empresa
- * y se almacenan en localStorage como única fuente de verdad.
+ * ⭐ JERARQUÍA CORRECTA:
+ * Gerente
+ *   └── Empresa (Disgarmink S.L.)
+ *       └── Marca (Hoy Pecamos)
+ *           ├── Submarca (Modomio - Pizzas)
+ *           └── Submarca (BlackBurger - Hamburguesas)
  * 
  * USAR EN: Todos los filtros, cálculos, visualizaciones y componentes
  * 
@@ -23,6 +27,8 @@
  * - Operativa, Chat y Soporte
  */
 
+import { type Submarca } from '../types/submarca.types';
+
 // ============================================
 // TIPOS E INTERFACES
 // ============================================
@@ -31,13 +37,22 @@ export interface Marca {
   id: string;
   codigo: string;
   nombre: string;
-  colorIdentidad: string;
-  icono?: string;
-  logoUrl?: string; // URL o base64 del logo de la marca
-  logo?: string; // Alias de logoUrl
-  empresaId?: string;
-  empresaNombre?: string;
-  activo?: boolean;
+  empresaId: string;
+  
+  // Identidad visual de la marca principal
+  colorPrincipal: string;
+  colorSecundario: string;
+  logoUrl?: string;
+  logo?: string;
+  
+  // Submarcas que pertenecen a esta marca
+  submarcasIds: string[];
+  
+  // Puntos de venta
+  puntosVentaIds: string[];
+  
+  // Estado
+  activo: boolean;
   fechaCreacion?: string;
 }
 
@@ -52,7 +67,11 @@ export interface PuntoVenta {
   };
   telefono: string;
   email: string;
-  marcasDisponibles: string[]; // IDs de marcas
+  
+  // Submarcas disponibles en este PDV (ahora apuntan a submarcas, no marcas)
+  submarcasDisponibles: string[];
+  
+  marcaId: string; // Marca a la que pertenece
   empresaId: string;
   activo: boolean;
 }
@@ -64,113 +83,111 @@ export interface Empresa {
   nombreComercial: string;
   cif: string;
   domicilioFiscal: string;
-  marcasIds: string[]; // IDs de marcas que pertenecen a esta empresa
-  puntosVentaIds: string[]; // IDs de PDVs que pertenecen a esta empresa
+  
+  // Marcas que pertenecen a esta empresa
+  marcasIds: string[];
+  
+  // Puntos de venta
+  puntosVentaIds: string[];
+  
   activo: boolean;
 }
 
 // ============================================
-// DATOS MAESTROS
+// DATOS MAESTROS - HOY PECAMOS
 // ============================================
 
 /**
- * MARCAS POR DEFECTO (Fallback si localStorage está vacío)
+ * EMPRESA: Disgarmink S.L.
  */
-const MARCAS_DEFAULT: Record<string, Marca> = {
-  'MRC-001': {
-    id: 'MRC-001',
-    codigo: 'MODOMIO',
-    nombre: 'Modomio',
-    colorIdentidad: '#FF6B35',
-    icono: '🍕',
-    logoUrl: 'figma:asset/b966ced4dfea1f56e5df241d7888d0c365c0e242.png', // Logo circular con gorro de chef y bigote
-    empresaId: 'EMP-001',
-    activo: true
-  },
-  'MRC-002': {
-    id: 'MRC-002',
-    codigo: 'BLACKBURGUER',
-    nombre: 'Blackburguer',
-    colorIdentidad: '#1A1A1A',
-    icono: '🍔',
-    logoUrl: 'figma:asset/38810c4050d91b450da46794e58e881817083739.png', // Logo con hamburguesa y texto BLACK BURGUERR
-    empresaId: 'EMP-001',
+export const EMPRESAS: Record<string, Empresa> = {
+  'EMP-001': {
+    id: 'EMP-001',
+    codigo: 'DISARMINK',
+    nombreFiscal: 'Disarmink S.L.',
+    nombreComercial: 'Hoy Pecamos',
+    cif: 'B67284315',
+    domicilioFiscal: 'Avenida Onze Setembre, 1, 08391 Tiana, Barcelona',
+    marcasIds: ['MRC-HOYPECAMOS'],
+    puntosVentaIds: ['PDV-TIANA', 'PDV-BADALONA'],
     activo: true
   }
 };
 
 /**
- * FUNCIÓN PARA CARGAR MARCAS DESDE LOCALSTORAGE
- * ⭐ Sistema de Marcas MADRE - Lee desde 'udar_marcas_sistema'
+ * MARCA: Hoy Pecamos
+ * (Marca principal que engloba Modomio y BlackBurger)
  */
-function cargarMarcasDesdeLocalStorage(): Record<string, Marca> {
-  // Verificar si estamos en el navegador
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    console.log('📦 No hay localStorage disponible, usando marcas por defecto');
-    return MARCAS_DEFAULT;
-  }
-
-  try {
-    const marcasJSON = localStorage.getItem('udar_marcas_sistema');
-    if (!marcasJSON) {
-      console.log('📦 No hay marcas en localStorage, usando marcas por defecto');
-      return MARCAS_DEFAULT;
-    }
-
-    const marcasArray: Marca[] = JSON.parse(marcasJSON);
-    const marcasRecord: Record<string, Marca> = {};
+export const MARCAS: Record<string, Marca> = {
+  'MRC-HOYPECAMOS': {
+    id: 'MRC-HOYPECAMOS',
+    codigo: 'HOYPECAMOS',
+    nombre: 'Hoy Pecamos',
+    empresaId: 'EMP-001',
     
-    marcasArray.forEach(marca => {
-      // Normalizar el objeto marca para asegurar compatibilidad
-      marcasRecord[marca.id] = {
-        id: marca.id,
-        codigo: marca.codigo,
-        nombre: marca.nombre,
-        colorIdentidad: marca.colorIdentidad || (marca as any).color || '#0d9488',
-        icono: marca.icono,
-        logoUrl: marca.logoUrl || marca.logo || '',
-        logo: marca.logo || marca.logoUrl || '',
-        empresaId: marca.empresaId,
-        empresaNombre: marca.empresaNombre,
-        activo: marca.activo !== false,
-        fechaCreacion: marca.fechaCreacion
-      };
-    });
-
-    console.log('✅ Marcas cargadas desde localStorage:', marcasRecord);
-    return Object.keys(marcasRecord).length > 0 ? marcasRecord : MARCAS_DEFAULT;
-  } catch (error) {
-    console.error('❌ Error al cargar marcas desde localStorage:', error);
-    return MARCAS_DEFAULT;
+    // Colores corporativos Hoy Pecamos
+    colorPrincipal: '#ED1C24', // Rojo
+    colorSecundario: '#000000', // Negro
+    
+    // Submarcas (líneas de producto)
+    submarcasIds: ['SUB-MODOMIO', 'SUB-BLACKBURGER'],
+    
+    // Puntos de venta
+    puntosVentaIds: ['PDV-TIANA', 'PDV-BADALONA'],
+    
+    activo: true,
+    fechaCreacion: new Date().toISOString()
   }
-}
+};
 
 /**
- * MARCAS DISPONIBLES EN EL SISTEMA
- * ⭐ Se cargan dinámicamente desde localStorage
+ * SUBMARCAS: Modomio (Pizzas) y BlackBurger (Hamburguesas)
+ * Las submarcas son las líneas de producto de "Hoy Pecamos"
  */
-export let MARCAS: Record<string, Marca> = typeof window !== 'undefined' 
-  ? cargarMarcasDesdeLocalStorage() 
-  : MARCAS_DEFAULT;
+export const SUBMARCAS: Record<string, Submarca> = {
+  'SUB-MODOMIO': {
+    id: 'SUB-MODOMIO',
+    codigo: 'MODOMIO',
+    nombre: 'Modomio',
+    marcaId: 'MRC-HOYPECAMOS',
+    empresaId: 'EMP-001',
+    
+    // Identidad visual
+    colorIdentidad: '#FF6B35',
+    icono: '🍕',
+    logoUrl: 'figma:asset/b966ced4dfea1f56e5df241d7888d0c365c0e242.png',
+    
+    tipo: 'Pizzas',
+    descripcion: 'Pizzas artesanales con ingredientes frescos',
+    
+    activo: true,
+    fechaCreacion: new Date().toISOString(),
+    orden: 1
+  },
+  'SUB-BLACKBURGER': {
+    id: 'SUB-BLACKBURGER',
+    codigo: 'BLACKBURGER',
+    nombre: 'BlackBurger',
+    marcaId: 'MRC-HOYPECAMOS',
+    empresaId: 'EMP-001',
+    
+    // Identidad visual
+    colorIdentidad: '#1A1A1A',
+    icono: '🍔',
+    logoUrl: 'figma:asset/38810c4050d91b450da46794e58e881817083739.png',
+    
+    tipo: 'Hamburguesas',
+    descripcion: 'Hamburguesas gourmet con carne premium',
+    
+    activo: true,
+    fechaCreacion: new Date().toISOString(),
+    orden: 2
+  }
+};
 
 /**
- * FUNCIÓN PARA RECARGAR MARCAS
- * Se debe llamar cuando se actualicen las marcas en el sistema
- */
-export function recargarMarcas() {
-  MARCAS = cargarMarcasDesdeLocalStorage();
-  console.log('🔄 Marcas recargadas:', MARCAS);
-}
-
-// Escuchar eventos de actualización de marcas
-if (typeof window !== 'undefined') {
-  window.addEventListener('marcas-sistema-updated', () => {
-    recargarMarcas();
-  });
-}
-
-/**
- * PUNTOS DE VENTA DISPONIBLES EN EL SISTEMA
+ * PUNTOS DE VENTA
+ * Ahora tienen submarcasDisponibles en lugar de marcasDisponibles
  */
 export const PUNTOS_VENTA: Record<string, PuntoVenta> = {
   'PDV-TIANA': {
@@ -184,7 +201,11 @@ export const PUNTOS_VENTA: Record<string, PuntoVenta> = {
     },
     telefono: '+34 933 456 789',
     email: 'tiana@hoypecamos.com',
-    marcasDisponibles: ['MRC-001', 'MRC-002'],
+    
+    // Submarcas disponibles en este PDV
+    submarcasDisponibles: ['SUB-MODOMIO', 'SUB-BLACKBURGER'],
+    
+    marcaId: 'MRC-HOYPECAMOS',
     empresaId: 'EMP-001',
     activo: true
   },
@@ -199,38 +220,22 @@ export const PUNTOS_VENTA: Record<string, PuntoVenta> = {
     },
     telefono: '+34 933 456 790',
     email: 'badalona@hoypecamos.com',
-    marcasDisponibles: ['MRC-001', 'MRC-002'],
+    
+    // Submarcas disponibles en este PDV
+    submarcasDisponibles: ['SUB-MODOMIO', 'SUB-BLACKBURGER'],
+    
+    marcaId: 'MRC-HOYPECAMOS',
     empresaId: 'EMP-001',
     activo: true
   }
 };
 
-/**
- * EMPRESAS DISPONIBLES EN EL SISTEMA
- */
-export const EMPRESAS: Record<string, Empresa> = {
-  'EMP-001': {
-    id: 'EMP-001',
-    codigo: 'DISARMINK',
-    nombreFiscal: 'Disarmink S.L.',
-    nombreComercial: 'Hoy Pecamos',
-    cif: 'B67284315',
-    domicilioFiscal: 'Avenida Onze Setembre, 1, 08391 Tiana, Barcelona',
-    marcasIds: ['MRC-001', 'MRC-002'],
-    puntosVentaIds: ['PDV-TIANA', 'PDV-BADALONA'],
-    activo: true
-  }
-};
-
 // ============================================
-// FUNCIONES AUXILIARES PARA FILTROS
+// FUNCIONES AUXILIARES
 // ============================================
 
 /**
  * Obtiene el nombre completo de la empresa para visualización
- * @param empresaId ID de la empresa
- * @returns "{nombreFiscal} - {nombreComercial}"
- * @example "Disarmink S.L. - Hoy Pecamos"
  */
 export function getNombreEmpresa(empresaId: string): string {
   const empresa = EMPRESAS[empresaId];
@@ -239,42 +244,7 @@ export function getNombreEmpresa(empresaId: string): string {
 }
 
 /**
- * Obtiene el nombre completo del PDV con sus marcas para visualización
- * @param pdvId ID del punto de venta
- * @returns "{nombrePDV} - {marca1}, {marca2}"
- * @example "Tiana - Modomio, Blackburguer"
- */
-export function getNombrePDVConMarcas(pdvId: string): string {
-  const pdv = PUNTOS_VENTA[pdvId];
-  if (!pdv) return 'PDV no encontrado';
-  
-  const marcasNombres = pdv.marcasDisponibles
-    .map(marcaId => MARCAS[marcaId]?.nombre)
-    .filter(Boolean)
-    .join(', ');
-  
-  if (marcasNombres) {
-    return `${pdv.nombre} - ${marcasNombres}`;
-  }
-  return pdv.nombre;
-}
-
-/**
- * Obtiene solo el nombre del PDV
- * @param pdvId ID del punto de venta
- * @returns Nombre del PDV
- * @example "Tiana"
- */
-export function getNombrePDV(pdvId: string): string {
-  const pdv = PUNTOS_VENTA[pdvId];
-  return pdv?.nombre || 'PDV no encontrado';
-}
-
-/**
  * Obtiene el nombre de la marca
- * @param marcaId ID de la marca
- * @returns Nombre de la marca
- * @example "Modomio"
  */
 export function getNombreMarca(marcaId: string): string {
   const marca = MARCAS[marcaId];
@@ -282,9 +252,41 @@ export function getNombreMarca(marcaId: string): string {
 }
 
 /**
+ * Obtiene el nombre de la submarca
+ */
+export function getNombreSubmarca(submarcaId: string): string {
+  const submarca = SUBMARCAS[submarcaId];
+  return submarca?.nombre || 'Submarca no encontrada';
+}
+
+/**
+ * Obtiene el nombre del PDV
+ */
+export function getNombrePDV(pdvId: string): string {
+  const pdv = PUNTOS_VENTA[pdvId];
+  return pdv?.nombre || 'PDV no encontrado';
+}
+
+/**
+ * Obtiene el nombre completo del PDV con sus submarcas
+ */
+export function getNombrePDVConSubmarcas(pdvId: string): string {
+  const pdv = PUNTOS_VENTA[pdvId];
+  if (!pdv) return 'PDV no encontrado';
+  
+  const submarcasNombres = pdv.submarcasDisponibles
+    .map(submarcaId => SUBMARCAS[submarcaId]?.nombre)
+    .filter(Boolean)
+    .join(', ');
+  
+  if (submarcasNombres) {
+    return `${pdv.nombre} - ${submarcasNombres}`;
+  }
+  return pdv.nombre;
+}
+
+/**
  * Obtiene todas las marcas de una empresa
- * @param empresaId ID de la empresa
- * @returns Array de objetos Marca
  */
 export function getMarcasEmpresa(empresaId: string): Marca[] {
   const empresa = EMPRESAS[empresaId];
@@ -293,9 +295,16 @@ export function getMarcasEmpresa(empresaId: string): Marca[] {
 }
 
 /**
+ * Obtiene todas las submarcas de una marca
+ */
+export function getSubmarcasMarca(marcaId: string): Submarca[] {
+  const marca = MARCAS[marcaId];
+  if (!marca) return [];
+  return marca.submarcasIds.map(id => SUBMARCAS[id]).filter(Boolean);
+}
+
+/**
  * Obtiene todos los PDVs de una empresa
- * @param empresaId ID de la empresa
- * @returns Array de objetos PuntoVenta
  */
 export function getPDVsEmpresa(empresaId: string): PuntoVenta[] {
   const empresa = EMPRESAS[empresaId];
@@ -304,53 +313,59 @@ export function getPDVsEmpresa(empresaId: string): PuntoVenta[] {
 }
 
 /**
- * Obtiene todos los PDVs que tienen una marca específica
- * @param marcaId ID de la marca
- * @returns Array de objetos PuntoVenta
+ * Obtiene todos los PDVs que tienen una submarca específica
  */
-export function getPDVsPorMarca(marcaId: string): PuntoVenta[] {
+export function getPDVsPorSubmarca(submarcaId: string): PuntoVenta[] {
   return Object.values(PUNTOS_VENTA).filter(pdv => 
-    pdv.marcasDisponibles.includes(marcaId)
+    pdv.submarcasDisponibles.includes(submarcaId)
   );
 }
 
 /**
- * Obtiene el icono de una marca
- * @param marcaId ID de la marca
- * @returns Emoji del icono
+ * Obtiene el icono de una submarca
+ */
+export function getIconoSubmarca(submarcaId: string): string {
+  const submarca = SUBMARCAS[submarcaId];
+  return submarca?.icono || '🏪';
+}
+
+// ============================================
+// FUNCIONES DE COMPATIBILIDAD (DEPRECATED)
+// ============================================
+
+/**
+ * @deprecated Usar getNombrePDVConSubmarcas en su lugar
+ * Mantiene compatibilidad con código antiguo
+ */
+export function getNombrePDVConMarcas(pdvId: string): string {
+  return getNombrePDVConSubmarcas(pdvId);
+}
+
+/**
+ * @deprecated Usar getIconoSubmarca en su lugar
+ * Mantiene compatibilidad con código antiguo
  */
 export function getIconoMarca(marcaId: string): string {
+  // Convertir marcaId a submarcaId si es necesario
+  // Por ahora, retornar icono genérico
   const marca = MARCAS[marcaId];
-  return marca?.icono || '🏪';
+  if (!marca) return '🏪';
+  
+  // Si la marca tiene submarcas, usar el icono de la primera
+  if (marca.submarcasIds && marca.submarcasIds.length > 0) {
+    return getIconoSubmarca(marca.submarcasIds[0]);
+  }
+  
+  return '🏪';
 }
 
 // ============================================
 // ARRAYS PARA SELECT/DROPDOWN
 // ============================================
 
-/**
- * Array de todas las empresas para usar en selects
- */
 export const EMPRESAS_ARRAY = Object.values(EMPRESAS);
-
-/**
- * Obtiene array de todas las marcas (siempre actualizado)
- * @returns Array de objetos Marca
- */
-export function getMarcasArray(): Marca[] {
-  return Object.values(MARCAS);
-}
-
-/**
- * Array de todas las marcas para usar en selects
- * ⭐ IMPORTANTE: Usar getMarcasArray() para obtener datos actualizados
- * Este export se mantiene por compatibilidad pero puede estar desactualizado
- */
 export const MARCAS_ARRAY = Object.values(MARCAS);
-
-/**
- * Array de todos los PDVs para usar en selects
- */
+export const SUBMARCAS_ARRAY = Object.values(SUBMARCAS);
 export const PUNTOS_VENTA_ARRAY = Object.values(PUNTOS_VENTA);
 
 // ============================================
@@ -367,36 +382,33 @@ export const OPCIONES_FILTRO_EMPRESA = EMPRESAS_ARRAY.map(emp => ({
 }));
 
 /**
- * Opciones para filtros de PDV
- */
-export const OPCIONES_FILTRO_PDV = PUNTOS_VENTA_ARRAY.map(pdv => ({
-  value: pdv.id,
-  label: getNombrePDVConMarcas(pdv.id),
-  pdvId: pdv.id,
-  empresaId: pdv.empresaId
-}));
-
-/**
- * Obtiene opciones de filtro de marca (siempre actualizado)
- * @returns Array de opciones para filtros
- */
-export function getOpcionesFiltroMarca() {
-  return Object.values(MARCAS).map(marca => ({
-    value: marca.id,
-    label: marca.nombre,
-    marcaId: marca.id,
-    icono: marca.icono
-  }));
-}
-
-/**
  * Opciones para filtros de marca
- * ⭐ IMPORTANTE: Usar getOpcionesFiltroMarca() para datos actualizados
- * Este export se mantiene por compatibilidad pero puede estar desactualizado
  */
 export const OPCIONES_FILTRO_MARCA = MARCAS_ARRAY.map(marca => ({
   value: marca.id,
   label: marca.nombre,
   marcaId: marca.id,
-  icono: marca.icono
+  empresaId: marca.empresaId
+}));
+
+/**
+ * Opciones para filtros de submarca
+ */
+export const OPCIONES_FILTRO_SUBMARCA = SUBMARCAS_ARRAY.map(submarca => ({
+  value: submarca.id,
+  label: submarca.nombre,
+  submarcaId: submarca.id,
+  marcaId: submarca.marcaId,
+  icono: submarca.icono
+}));
+
+/**
+ * Opciones para filtros de PDV
+ */
+export const OPCIONES_FILTRO_PDV = PUNTOS_VENTA_ARRAY.map(pdv => ({
+  value: pdv.id,
+  label: getNombrePDVConSubmarcas(pdv.id),
+  pdvId: pdv.id,
+  marcaId: pdv.marcaId,
+  empresaId: pdv.empresaId
 }));

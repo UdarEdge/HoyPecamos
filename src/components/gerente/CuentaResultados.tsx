@@ -3,6 +3,8 @@ import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Filter, Calend
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { FiltroContextoJerarquico, SelectedContext } from './FiltroContextoJerarquico';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Label } from '../ui/label';
 import {
   Tooltip,
   TooltipContent,
@@ -77,17 +79,23 @@ export function CuentaResultados({
 
   // Estados para filtros - ACTUALIZADO CON CONTEXTO JERÁRQUICO
   const [selectedContext, setSelectedContext] = useState<SelectedContext[]>([]);
-  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>('Mes');
-  const [modoVisualizacion, setModoVisualizacion] = useState<'mes_completo' | 'acumulado_hoy'>(
-    tipoPeriodo === 'Mes completo' ? 'mes_completo' : 'acumulado_hoy'
-  );
+  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>('mes_actual_completo');
+  const [modoVisualizacion, setModoVisualizacion] = useState<'mes_completo' | 'acumulado_hoy'>('mes_completo');
   const [comparativaLocal, setComparativaLocal] = useState<boolean>(comparativaActiva);
   const [pdvComparado, setPdvComparado] = useState<string>(tiendaComparativa || 'PDV-TIANA');
 
   // Estado para datos
   const [datosAPI, setDatosAPI] = useState<CuentaResultadosData | null>(null);
 
-  const periodos = ['Hoy', 'Semana', 'Mes', 'Trimestre', 'Año', 'Personalizado'];
+  // Función para obtener nombre del mes actual
+  const obtenerNombreMesActual = () => {
+    const fecha = new Date();
+    const meses = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    return `${meses[fecha.getMonth()]} ${fecha.getFullYear()}`;
+  };
 
   // ============================================
   // FUNCIONES DE CÁLCULO
@@ -590,6 +598,38 @@ export function CuentaResultados({
         selectedContext={selectedContext}
         onChange={setSelectedContext}
       />
+
+      {/* SELECTOR DE PERÍODO COMBINADO */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <Label className="text-xs text-gray-600 mb-2 block">Período</Label>
+        <Select 
+          value={periodoSeleccionado} 
+          onValueChange={(value) => {
+            setPeriodoSeleccionado(value);
+            // Actualizar modo de visualización según el valor seleccionado
+            if (value.includes('completo')) {
+              setModoVisualizacion('mes_completo');
+            } else if (value.includes('ultimos')) {
+              setModoVisualizacion('acumulado_hoy');
+            }
+          }}
+        >
+          <SelectTrigger className="w-full bg-white h-10">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="hoy">Hoy</SelectItem>
+            <SelectItem value="ayer">Ayer</SelectItem>
+            <SelectItem value="semana_actual">Semana actual</SelectItem>
+            <SelectItem value="mes_actual_completo">{obtenerNombreMesActual()} - Mes completo</SelectItem>
+            <SelectItem value="mes_actual_ultimos_30">{obtenerNombreMesActual()} - Últimos 30 días</SelectItem>
+            <SelectItem value="mes_anterior_completo">Mes anterior - Completo</SelectItem>
+            <SelectItem value="trimestre_actual">Trimestre actual</SelectItem>
+            <SelectItem value="año_actual">Año actual</SelectItem>
+            <SelectItem value="personalizado">Personalizado</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       
       {/* TABLA P&L */}
       <Card>
@@ -600,7 +640,7 @@ export function CuentaResultados({
           <CardDescription className="text-xs sm:text-sm">
             {selectedContext.length > 0 && selectedContext[0].punto_venta_id 
               ? getNombrePDVConMarcas(selectedContext[0].punto_venta_id)
-              : 'Todas las empresas'} - {periodoSeleccionado === 'Mes' ? 'Noviembre 2025' : periodoSeleccionado}
+              : 'Todas las empresas'} - {periodoSeleccionado === 'mes_actual_completo' ? obtenerNombreMesActual() : periodoSeleccionado}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0 sm:p-6">

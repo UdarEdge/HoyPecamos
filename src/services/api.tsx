@@ -1,4 +1,4 @@
-import { fetchAPI, getSupabaseClient } from '../utils/supabase/client';
+import { fetchAPI, getSupabaseClient } from '../utils/supabase/client.tsx';
 
 // ==================== AUTENTICACIÓN ====================
 

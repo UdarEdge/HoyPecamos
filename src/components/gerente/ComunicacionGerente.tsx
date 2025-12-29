@@ -33,7 +33,7 @@ export function ComunicacionGerente() {
                     Gestiona promociones y ofertas especiales para tus clientes
                   </p>
                 </div>
-                <Button className="bg-purple-600 hover:bg-purple-700">
+                <Button className="bg-[#ED1C24] hover:bg-[#c91820] text-white h-9 sm:h-10 font-medium rounded-lg shadow-md hover:shadow-lg transition-all">
                   <Plus className="w-4 h-4 mr-2" />
                   Nueva Promoción
                 </Button>

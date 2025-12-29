@@ -184,7 +184,7 @@ export const aceptarPedidoDelivery = async (
     
     // ⭐ NUEVO: Descontar stock al aceptar pedido delivery
     try {
-      const { stockIntegrationService } = await import('../../services/stock-integration.service');
+      const { stockIntegrationService } = await import('./stock-integration.service');
       const resultadoDescuento = stockIntegrationService.descontarStockPorPedido(
         pedido,
         'Sistema Delivery'

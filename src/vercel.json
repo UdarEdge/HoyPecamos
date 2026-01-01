@@ -1,8 +1,7 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "installCommand": "npm install",
+  "buildCommand": null,
+  "outputDirectory": ".",
+  "installCommand": null,
   "headers": [
     {
       "source": "/(.*)",

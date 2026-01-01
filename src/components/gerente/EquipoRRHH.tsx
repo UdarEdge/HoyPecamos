@@ -57,6 +57,7 @@ import {
 } from '../ui/dropdown-menu';
 import { DashboardOnboarding } from './DashboardOnboarding';
 import { GestionHorarios } from './GestionHorarios';
+import { ListadoEquipoMejorado } from './ListadoEquipoMejorado';
 import { Separator } from '../ui/separator';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -1768,187 +1769,13 @@ export function EquipoRRHH() {
 
           {/* SUB-TAB: LISTADO DE EQUIPO */}
           {subTabEquipo === 'listado' && (
-            <Card>
-            <CardHeader className="p-4 sm:p-6 flex flex-row items-center justify-between">
-              <CardTitle className="text-base sm:text-lg md:text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                Listado del Equipo
-              </CardTitle>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <FileDown className="w-4 h-4" />
-                    <span className="hidden sm:inline">Exportar</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => {
-                    const datos = empleados.map(e => ({
-                      'Nombre': `${e.nombre} ${e.apellidos}`,
-                      'Empresa': getNombreEmpresa(e.empresaId),
-                      'PDV': e.puntosVentaAsignados?.map(p => PUNTOS_VENTA[p]?.nombre).join(', ') || 'N/A',
-                      'Puesto': e.puesto,
-                      'Email': e.email,
-                      'Teléfono': e.telefono,
-                      'Estado': e.estado
-                    }));
-                    exportarAExcel(datos, 'listado_equipo', ['Nombre', 'Empresa', 'PDV', 'Puesto', 'Email', 'Teléfono', 'Estado']);
-                  }}>
-                    Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {
-                    const datos = empleados.map(e => ({
-                      'Nombre': `${e.nombre} ${e.apellidos}`,
-                      'Empresa': getNombreEmpresa(e.empresaId),
-                      'PDV': e.puntosVentaAsignados?.map(p => PUNTOS_VENTA[p]?.nombre).join(', ') || 'N/A',
-                      'Puesto': e.puesto,
-                      'Email': e.email,
-                      'Teléfono': e.telefono,
-                      'Estado': e.estado
-                    }));
-                    exportarACSV(datos, 'listado_equipo', ['Nombre', 'Empresa', 'PDV', 'Puesto', 'Email', 'Teléfono', 'Estado']);
-                  }}>
-                    CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {
-                    const datos = empleados.map(e => ({
-                      'Nombre': `${e.nombre} ${e.apellidos}`,
-                      'Empresa': getNombreEmpresa(e.empresaId),
-                      'PDV': e.puntosVentaAsignados?.map(p => PUNTOS_VENTA[p]?.nombre).join(', ') || 'N/A',
-                      'Puesto': e.puesto,
-                      'Email': e.email,
-                      'Teléfono': e.telefono,
-                      'Estado': e.estado
-                    }));
-                    exportarAPDF(datos, 'listado_equipo', ['Nombre', 'Empresa', 'PDV', 'Puesto', 'Email', 'Teléfono', 'Estado'], 'Listado del Equipo');
-                  }}>
-                    PDF
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6">
-              <div className="space-y-3 sm:space-y-4">
-                {empleados.map((empleado) => (
-                  <div
-                    key={empleado.id}
-                    className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-3 sm:p-4 border rounded-lg hover:shadow-md transition-shadow"
-                  >
-                    <Avatar className="w-12 h-12 sm:w-16 sm:h-16 shrink-0">
-                      <AvatarImage src={empleado.avatar} alt={empleado.nombre} />
-                      <AvatarFallback className="text-xs sm:text-sm">
-                        {empleado.nombre.charAt(0)}{empleado.apellidos.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-
-                    <div className="flex-1 min-w-0 w-full">
-                      <div className="flex items-start sm:items-center justify-between gap-2 mb-2">
-                        <h3 className="font-medium text-sm sm:text-base text-gray-900 truncate">
-                          {empleado.nombre} {empleado.apellidos}
-                        </h3>
-                        {getEstadoBadge(empleado.estado)}
-                      </div>
-
-                      {/* ⭐ NUEVO: Mostrar contexto multiempresa */}
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        <Badge variant="outline" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700 border-blue-200">
-                          🏢 {getNombreEmpresa(empleado.empresaId)}
-                        </Badge>
-                        {empleado.marcaId && (
-                          <Badge variant="outline" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700 border-purple-200">
-                            {getIconoMarca(empleado.marcaId)} {getNombreMarca(empleado.marcaId)}
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className="text-[10px] sm:text-xs bg-green-50 text-green-700 border-green-200">
-                          📍 {PUNTOS_VENTA[empleado.puntoVentaId]?.nombre || empleado.puntoVentaId}
-                        </Badge>
-                        {empleado.puntosVentaAsignados && empleado.puntosVentaAsignados.length > 1 && (
-                          <Badge variant="outline" className="text-[10px] sm:text-xs bg-amber-50 text-amber-700 border-amber-200">
-                            +{empleado.puntosVentaAsignados.length - 1} PDV más
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-                        <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                          <Briefcase className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                          <span className="truncate">{empleado.puesto} - {empleado.departamento}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                          <Mail className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                          <span className="truncate">{empleado.email}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                          <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                          <span>{empleado.telefono}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                          <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                          <span className="hidden sm:inline">Desde {format(new Date(empleado.fechaIngreso), 'dd/MM/yyyy')}</span>
-                          <span className="sm:hidden">{format(new Date(empleado.fechaIngreso), 'dd/MM/yy')}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                        <div className="flex items-center gap-1.5 sm:gap-2">
-                          <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600 shrink-0" />
-                          <span className="text-xs sm:text-sm">
-                            <span className="font-medium">{empleado.horasTrabajadas}h</span>
-                            <span className="text-gray-500"> / {empleado.horasContrato}h <span className="hidden sm:inline">este mes</span></span>
-                          </span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="h-1.5 sm:h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${
-                                empleado.horasTrabajadas > empleado.horasContrato
-                                  ? 'bg-orange-500'
-                                  : 'bg-teal-600'
-                              }`}
-                              style={{
-                                width: `${Math.min((empleado.horasTrabajadas / empleado.horasContrato) * 100, 100)}%`
-                              }}
-                            />
-                          </div>
-                        </div>
-                        {empleado.centroCostePorcentaje && (
-                          <div className="flex items-center gap-1 text-xs sm:text-sm text-gray-600">
-                            <Percent className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                            <span className="font-medium">{empleado.centroCostePorcentaje}%</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 sm:h-9 sm:w-9 p-0 shrink-0">
-                          <MoreVertical className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleAbrirChat(empleado)}>
-                          <MessageCircle className="w-4 h-4 mr-2" />
-                          Abrir Chat
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleVerPerfil(empleado)}>
-                          <Eye className="w-4 h-4 mr-2" />
-                          Ver perfil
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAdministrarPermisos(empleado)}>
-                          <Shield className="w-4 h-4 mr-2" />
-                          Administrar permisos
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleModificarContrato(empleado)}>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Modificar contrato
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+            <ListadoEquipoMejorado
+              empleados={empleados}
+              onAbrirChat={handleAbrirChat}
+              onVerPerfil={handleVerPerfil}
+              onAdministrarPermisos={handleAdministrarPermisos}
+              onModificarContrato={handleModificarContrato}
+            />
           )}
 
           {/* SUB-TAB: CENTROS DE COSTES */}
@@ -3130,6 +2957,14 @@ export function EquipoRRHH() {
       {/* Modal Ver Perfil Empleado */}
       <Dialog open={modalVerPerfil} onOpenChange={setModalVerPerfil}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {empleadoSeleccionado ? `${empleadoSeleccionado.nombre} ${empleadoSeleccionado.apellidos}` : 'Perfil del Empleado'}
+            </DialogTitle>
+            <DialogDescription>
+              {empleadoSeleccionado ? `${empleadoSeleccionado.puesto} - ${PUNTOS_VENTA[empleadoSeleccionado.puntoVentaId]?.nombre || 'Sin PDV'}` : ''}
+            </DialogDescription>
+          </DialogHeader>
           {empleadoSeleccionado && (
             <Tabs defaultValue="info" className="w-full">
               <TabsList className="grid w-full grid-cols-4">

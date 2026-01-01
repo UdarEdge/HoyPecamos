@@ -13,7 +13,7 @@ import { FacturacionFinanzas } from './gerente/FacturacionFinanzas';
 import { PersonalRRHH } from './gerente/PersonalRRHH';
 import { StockProveedores } from './gerente/StockProveedores';
 import { ProductividadGerente } from './gerente/ProductividadGerente';
-import { EquipoRRHH } from './gerente/EquipoRRHH';
+import { EquipoRRHHv2 } from './gerente/EquipoRRHHv2';
 import { PedidosGerente } from './gerente/PedidosGerente';
 import { ProcesadorPedidosCanales } from './gerente/ProcesadorPedidosCanales'; // 🤖 PROCESADOR AUTOMÁTICO
 import { PUNTOS_VENTA_ARRAY, getNombrePDVConMarcas, getNombreMarca, MARCAS } from '../constants/empresaConfig';
@@ -363,7 +363,7 @@ export function GerenteDashboard({ user, onLogout, onCambiarRol }: GerenteDashbo
       case 'productividad':
         return <ProductividadGerente />;
       case 'equipo':
-        return <EquipoRRHH />;
+        return <EquipoRRHHv2 />;
       case 'tienda':
         // TPV360Master con permisos completos para gerente
         const permisosTPV: PermisosTPV = {

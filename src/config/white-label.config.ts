@@ -107,7 +107,7 @@ export const WHITE_LABEL_CONFIG: WhiteLabelConfig = {
   
   // Onboarding
   onboarding: {
-    enabled: true,
+    enabled: false, // ⚠️ DESHABILITADO TEMPORALMENTE PARA TESTING
     screens: [
       {
         id: '1',
